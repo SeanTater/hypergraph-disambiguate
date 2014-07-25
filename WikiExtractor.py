@@ -120,6 +120,8 @@ version = '2.5-wk'
 ##### Main function ###########################################################
 
 db_conn = sqlite3.connect("wordcounts.db")
+db_cursor = db_conn.cursor()
+db_cursor.execute("PRAGMA synchronous=off;")
 paragraph_id = 0
 
 def WikiDocument(out, id, title, text):
