@@ -63,6 +63,9 @@ import bz2
 import os.path
 from htmlentitydefs import name2codepoint
 
+import sqlite3
+from collections import Counter
+
 ### PARAMS ####################################################################
 
 # This is obtained from the dump itself
@@ -112,9 +115,12 @@ discardElements = set([
 #=========================================================================== 
 
 # Program version
-version = '2.5'
+version = '2.5-wk'
 
 ##### Main function ###########################################################
+
+db_conn = sqlite3.connect("wordcounts.db")
+paragraph_id = 0
 
 def WikiDocument(out, id, title, text):
     url = get_url(id, prefix)
@@ -124,11 +130,25 @@ def WikiDocument(out, id, title, text):
     header = header.encode('utf-8')
     text = clean(text)
     footer = "\n</doc>"
-    out.reserve(len(header) + len(text) + len(footer))
-    print >> out, header
-    for line in compact(text):
-        print >> out, line.encode('utf-8')
-    print >> out, footer
+    global paragraph_id
+    
+    for paragraph in compact(text):
+        
+        db_conn.execute("INSERT INTO PARAGRAPHS (doc_id, para_id, content) VALUES (?, ?, ?);",
+            (id, paragraph_id, paragraph))
+        
+        for word, count in Counter(paragraph.split()).most_common():
+            db_conn.execute("INSERT INTO WORD_COUNTS (word, count, para_id) VALUES (?, ?, ?);",
+                (word, count, paragraph_id))
+        paragraph_id += 1
+        
+    db_conn.commit()
+    
+    #out.reserve(len(header) + len(text) + len(footer))
+    #print >> out, header
+    #for line in compact(text):
+        #print >> out, line.encode('utf-8')
+    #print >> out, footer
 
 def get_url(id, prefix):
     return "%s?curid=%s" % (prefix, id)
