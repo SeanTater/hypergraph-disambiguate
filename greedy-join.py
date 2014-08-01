@@ -3,8 +3,8 @@
 import sqlite3
 conn = sqlite3.connect("wordcounts.db")
 
-import leveldb
-output = leveldb.LevelDB("phrasecounts-ldb")
+import lmdb
+output = lmdb.Environment("phrasecounts-lmdb", 2**38)
 
 # Looking for changes in para_id avoids the n+1 query problem
 last_para_id = -1
@@ -13,13 +13,9 @@ wordgroup = set()
 phrasegroup = set()
 
 def dump_cache(cache, output):
-    update = leveldb.WriteBatch()
-    for phrase, count in cache.iteritems():
-        try:
-            update.Put(phrase, str(int(output.Get(phrase)) + cache[phrase]))
-        except KeyError:
-            update.Put(phrase, str(cache[phrase]))
-    output.Write(update)
+    with output.begin(write=True) as txn:
+        for phrase, count in cache.iteritems():
+            txn.put(phrase, str(int(txn.get(phrase, 0)) + cache[phrase]))
     cache.clear()
 
 # This makes the (usually invalid) assumption that the data will be returned sorted by para_id
@@ -44,7 +40,7 @@ for word, count, para_id in conn.execute("select word, count, para_id from word_
                     else:
                         cache[phrase] += 1
                         
-        if len(cache) > 10000000:
+        if len(cache) > 50000000:
             dump_cache(cache, output)
         phrasegroup.clear()
         wordgroup.clear()
