@@ -3,8 +3,8 @@
 import sqlite3
 conn = sqlite3.connect("wordcounts.db")
 
-import lmdb
-output = lmdb.Environment("phrasecounts-lmdb", 2**38)
+output = open("phrasecounts.list", "w+")
+import struct
 
 # Looking for changes in para_id avoids the n+1 query problem
 last_para_id = -1
@@ -12,17 +12,38 @@ cache = {}
 wordgroup = set()
 phrasegroup = set()
 
-def dump_cache(cache, output):
-    with output.begin(write=True) as txn:
-        curs = txn.cursor()
-        for key, value in curs:
-            if key in cache:
-                curs.put(key, str(int(value) + cache[key]))
-                del cache[key]
-        
-        for phrase, count in cache.iteritems():
-            curs.put(phrase, str(count))
-    cache.clear()
+def dump_cache(cache, disk):
+    block = bytearray(disk.read(4096))
+    while block:
+        for i in range(len(block)):
+            length = block[i]; i += 1
+            word = str(block[i:i+length]); i += length
+            count = struct.unpack("I", block[i, i+4]); # No i += 4
+            
+            if word in cache:
+                block[i:i+4] = struct.pack("I", count + cache[word])
+                del cache[word]
+            
+        disk.seek(-len(block), 1)
+        disk.write(block)
+        block = bytearray(disk.read(4096))
+
+    block = []
+    block_length = 0
+    while cache:
+        word, count = cache.popitem()
+        if len(word) > 255:
+            # Delete 256+ character phrases
+            continue
+        item = chr(len(word)) + word + struct.pack("I", count)
+        if block_length + len(item) > 4096:
+            disk.write(''.join(block))
+            block = []
+            block_length = 0
+        block.append(item)
+        block_length += len(item)
+    disk.write(''.join(block))
+    disk.flush()
 
 # This makes the (usually invalid) assumption that the data will be returned sorted by para_id
 # We populated the DB in a way that we know this is the case but normally you would use "order by para_id"
