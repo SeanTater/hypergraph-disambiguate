@@ -14,8 +14,14 @@ phrasegroup = set()
 
 def dump_cache(cache, output):
     with output.begin(write=True) as txn:
+        curs = txn.cursor()
+        for key, value in curs:
+            if key in cache:
+                curs.put(key, str(int(value) + cache[key]))
+                del cache[key]
+        
         for phrase, count in cache.iteritems():
-            txn.put(phrase, str(int(txn.get(phrase, 0)) + cache[phrase]))
+            curs.put(phrase, str(count))
     cache.clear()
 
 # This makes the (usually invalid) assumption that the data will be returned sorted by para_id
