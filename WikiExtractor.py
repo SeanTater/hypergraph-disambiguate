@@ -64,6 +64,8 @@ import os.path
 from htmlentitydefs import name2codepoint
 
 import sqlite3
+import nltk
+import porterstemmer
 from collections import Counter
 
 ### PARAMS ####################################################################
@@ -134,12 +136,15 @@ def WikiDocument(out, id, title, text):
     footer = "\n</doc>"
     global paragraph_id
     
+    stemmer = porterstemmer.Stemmer()
+    
     for paragraph in compact(text):
         
         db_conn.execute("INSERT INTO PARAGRAPHS (doc_id, para_id, content) VALUES (?, ?, ?);",
             (id, paragraph_id, paragraph))
         
-        for word, count in Counter(paragraph.split()).most_common():
+        paragraph_split = ( stemmer(word) for word in re.findall(r"\w+|[^\w\s]", paragraph, re.UNICODE) ) #nltk.word_tokenize(paragraph))
+        for word, count in Counter(paragraph_split).most_common():
             db_conn.execute("INSERT INTO WORD_COUNTS (word, count, para_id) VALUES (?, ?, ?);",
                 (word, count, paragraph_id))
         paragraph_id += 1
