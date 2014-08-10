@@ -1,3 +1,4 @@
+module RIndex.RIndex where
 {-
     You'll need:
         murmur-hash
@@ -105,9 +106,3 @@ addBinaryMultiwordContext bloom_map tokens =
 -- Fill contexts based on whether words cooccur in a chunk
 indexBinaryChunks tokenized_chunks =
     foldl' addBinaryMultiwordContext makeEmptyBloomMap tokenized_chunks
-        
-    
-
-main = do
-    line <- getLine
-    print $ indexBinaryChunks $ [ words line ]
