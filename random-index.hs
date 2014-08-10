@@ -3,21 +3,16 @@
         murmur-hash
         vector
 -}
-{-# LANGUAGE DataKinds #-}
-
-import GHC.TypeLits
-import qualified Data.Vector.Unboxed as V
-
---import Data.Bits
 import Data.Word
 import Data.Int
+import Data.List
+import qualified Data.Vector.Unboxed as V
 import qualified Data.Map.Strict as M
-import Data.List -- mapAccumL
 import qualified Data.Digest.Murmur64 as Murmur
 
 
 
--- -- Hash
+-- -- Hashing, for use in Bloom and in Random Indexing
 
 -- Feel free to set these
 -- context_dims: n-dimensional space in which words are placed
@@ -80,20 +75,22 @@ addToBloom bloom word =
 makeNewBloom = 
     V.replicate bloom_bin_count (0::Word8)
 
+
 -- -- Bloomed Map
-data BloomMap = BloomMap (V.Vector Word8, M.Map String (V.Vector Int64)) deriving (Show)
+data BloomMap = BloomMap (V.Vector Word8) (M.Map String (V.Vector Int64)) deriving (Show)
 
 makeEmptyBloomMap = BloomMap makeNewBloom M.empty
 
 
 
--- -- Main
+
+-- -- Random Indexing
 
 -- If the word appears in the bloom at least n times, add context vectors
 addWordContext :: (BloomMap, V.Vector Int64) -> String -> (BloomMap, V.Vector Int64)
-addWordContext ((bloom, context_map), new_context) word
-    | popular = ((new_bloom, new_context_map), new_context)
-    | otherwise = ((new_bloom, context_map), new_context)
+addWordContext ((BloomMap bloom context_map), new_context) word
+    | popular = ((BloomMap new_bloom new_context_map), new_context)
+    | otherwise = ((BloomMap new_bloom context_map), new_context)
     where
         (popular, new_bloom) = addToBloom bloom word
         new_context_map = M.insertWith (V.zipWith (+)) word new_context context_map
