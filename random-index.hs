@@ -81,15 +81,16 @@ makeNewBloom =
     V.replicate bloom_bin_count (0::Word8)
 
 -- -- Bloomed Map
-data BloomMap = BloomMap (V.Vector Word8, M.Map String (V.Vector Int64) ) deriving (Show)
+data BloomMap = BloomMap (V.Vector Word8, M.Map String (V.Vector Int64)) deriving (Show)
 
-    
-    
-    
+makeEmptyBloomMap = BloomMap makeNewBloom M.empty
+
+
+
 -- -- Main
 
 -- If the word appears in the bloom at least n times, add context vectors
-addWordContext :: ((V.Vector Word8, M.Map String (V.Vector Int64)), V.Vector Int64) -> String -> ((V.Vector Word8, M.Map String (V.Vector Int64)), V.Vector Int64)
+addWordContext :: (BloomMap, V.Vector Int64) -> String -> (BloomMap, V.Vector Int64)
 addWordContext ((bloom, context_map), new_context) word
     | popular = ((new_bloom, new_context_map), new_context)
     | otherwise = ((new_bloom, context_map), new_context)
@@ -98,15 +99,15 @@ addWordContext ((bloom, context_map), new_context) word
         new_context_map = M.insertWith (V.zipWith (+)) word new_context context_map
 
 -- Chain addWordContext, but only calculate paragraph context once (used by binaryChunkContext)
-addBinaryMultiwordContext (bloom, context_map) tokens =
+addBinaryMultiwordContext bloom_map tokens =
     new_bloom_map
     where
         chunk_context = hashChunk tokens
-        (new_bloom_map, _) = foldl' (addWordContext) ((bloom, context_map), chunk_context) tokens
+        (new_bloom_map, _) = foldl' (addWordContext) (bloom_map, chunk_context) tokens
 
 -- Fill contexts based on whether words cooccur in a chunk
 indexBinaryChunks tokenized_chunks =
-    foldl' addBinaryMultiwordContext (makeNewBloom, M.empty) tokenized_chunks
+    foldl' addBinaryMultiwordContext makeEmptyBloomMap tokenized_chunks
         
     
 
