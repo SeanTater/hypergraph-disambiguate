@@ -7,9 +7,31 @@ module RIndex.RIndex where
 import Data.Word
 import Data.Int
 import Data.List
+import Control.Monad
+
+import Control.Monad.ST
 import qualified Data.Vector.Unboxed as V
+import qualified Data.Vector.Unboxed.Mutable as VM
 import qualified Data.Map.Strict as M
 import qualified Data.Digest.Murmur64 as Murmur
+
+-- -- Utility
+
+-- Use modify to get around state
+
+--vmap :: (VM.Unbox a) => (a -> a) -> [Int] -> VM.MVector s a -> ST s ()
+vmap func indices ivec =
+    vimap (\_ b -> func b) indices ivec
+
+--vimap :: (VM.Unbox a) => (Int -> a -> a) -> [Int] -> VM.MVector s a -> ST s ()
+vimap func indices vec =
+    foldM_ (map1) vec indices
+    where
+         map1 ov i = do
+             e_in <- VM.read ov i
+             let e_out = func i e_in
+             VM.write ov i e_out
+             return ov
 
 
 
@@ -36,12 +58,10 @@ getNHashes n word =
     where h seed = fromIntegral $ Murmur.asWord64 $ Murmur.hash64WithSeed seed word
           
 hashWord word =
-    V.generate context_dims (\i -> maybe 0 (\x -> x) (lookup i indices))
+    V.modify (vimap (\i _ -> evenOddToPosNeg $ fromIntegral i) indices) newEmptyHash
     where
-        hashes = getNHashes word_dims word
         evenOddToPosNeg x = (mod x 2) * 2 - 1
-        hashToIndex hash = hash `mod` context_dims
-        indices = [ (hashToIndex hash, evenOddToPosNeg $ fromIntegral hash) | hash <- hashes ]
+        indices = map (`mod` context_dims) $ getNHashes word_dims word
 
 -- Join hash-vectors of the words in the paragraph
 hashChunk tokens =
@@ -62,23 +82,24 @@ newEmptyHash = V.replicate context_dims context_type
  -}
 bloom_hash_count = 10
 bloom_bin_count = 25000000
-bloom_threshold = 0
+bloom_threshold = 3
 
 -- Count a word, Return (is_popular, new_bloom)
 addToBloom :: V.Vector Word8 -> String -> (Bool, V.Vector Word8)
 addToBloom bloom word =
-    (popular, V.accum (\a b -> max a (a+b)) bloom [ (idx, 1) | idx <- indices, not popular])
+    (popular, if popular then bloom else V.modify (vmap (incrementClamp) indices) bloom)
     where
+        incrementClamp a = max a (a+1)
         indices = [ hash `mod` bloom_bin_count | hash <- getNHashes bloom_hash_count word ]
         min_count = minimum [ (V.!) bloom idx | idx <- indices ]
         popular = min_count >= bloom_threshold
-        
+
 makeNewBloom = 
-    V.replicate bloom_bin_count (0::Word8)
+    V.thaw $ V.replicate bloom_bin_count (0::Word8)
 
 
 -- -- Bloomed Map
-data BloomMap = BloomMap (V.Vector Word8) (M.Map String (V.Vector Int64)) deriving (Show)
+data BloomMap = BloomMap (VM.IOVector Word8) (M.Map String (V.Vector Int64))
 
 makeEmptyBloomMap = BloomMap makeNewBloom M.empty
 
@@ -101,7 +122,7 @@ addBinaryMultiwordContext bloom_map tokens =
     new_bloom_map
     where
         chunk_context = hashChunk tokens
-        (new_bloom_map, _) = foldl' (addWordContext) (bloom_map, chunk_context) tokens
+        (new_bloom_map, _) = foldl (addWordContext) (bloom_map, chunk_context) tokens
 
 -- Fill contexts based on whether words cooccur in a chunk
 indexBinaryChunks tokenized_chunks =
