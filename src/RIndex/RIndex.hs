@@ -21,14 +21,14 @@ import qualified Data.Digest.Murmur64 as Murmur
 
 -- Use modify to get around state
 
---vmap :: (VM.Unbox a) => (a -> a) -> [Int] -> VM.MVector s a -> ST s ()
-vmap :: (PrimMonad m, V.Unbox t) => (t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
-vmap func indices ivec =
-    vimap (\_ b -> func b) indices ivec
+--mapOnIndex :: (VM.Unbox a) => (a -> a) -> [Int] -> VM.MVector s a -> ST s ()
+mapOnIndex :: (PrimMonad m, V.Unbox t) => (t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
+mapOnIndex func indices ivec =
+    mapWithIndexOnIndex (\_ b -> func b) indices ivec
 
---vimap :: (VM.Unbox a) => (Int -> a -> a) -> [Int] -> VM.MVector s a -> ST s ()
-vimap :: (PrimMonad m, V.Unbox t) => (Int -> t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
-vimap func indices vec =
+--mapWithIndexOnIndex :: (VM.Unbox a) => (Int -> a -> a) -> [Int] -> VM.MVector s a -> ST s ()
+mapWithIndexOnIndex :: (PrimMonad m, V.Unbox t) => (Int -> t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
+mapWithIndexOnIndex func indices vec =
     foldM_ (map1) vec indices
     where
          map1 ov i = do
@@ -64,7 +64,7 @@ getNHashes n word =
 
 hashWordIntoContext :: (PrimMonad m) => Context m -> String -> m ()
 hashWordIntoContext context word = do
-    vimap (\i _ -> evenOddToPosNeg $ fromIntegral i) indices context
+    mapWithIndexOnIndex (\i _ -> evenOddToPosNeg $ fromIntegral i) indices context
     where
         evenOddToPosNeg x = (mod x 2) * 2 - 1
         indices = map (`mod` context_dims) $ getNHashes word_dims word
@@ -100,7 +100,7 @@ addToBloom bloom word = do
     if minimum counts >= bloom_threshold
        then return True
        else do
-           vmap (incrementClamp) indices bloom
+           mapOnIndex (incrementClamp) indices bloom
            return False
     where
         incrementClamp a = max a (a+1)
