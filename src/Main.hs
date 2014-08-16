@@ -25,9 +25,8 @@ main = do
     let wc_as_wc = [ WordCount (fromSql w) (fromSql p) | (w : p : _) <- wordcounts ]
     let paragraphs = groupBy (\(WordCount w1 p1) (WordCount w2 p2)  -> p1 == p2) wc_as_wc
     let paragraph_tokens = [ [ w | WordCount w _  <- paragraph] | paragraph <- paragraphs]
-    
-    (RIndex.BloomMap _ bmap) <- RIndex.indexBinaryChunks paragraph_tokens
-    print $ M.keysSet bmap
+    let mp = RIndex.indexBinaryChunks paragraph_tokens
+    print $ M.keysSet mp
     disconnect conn
 
 {-

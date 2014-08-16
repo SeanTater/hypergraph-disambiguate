@@ -128,13 +128,10 @@ addWordContext :: (PrimMonad m) => V.Vector Int64 -> BloomMap m -> String -> m (
 addWordContext new_context (BloomMap bloom context_map) word = do
     popular <- addToBloom bloom word
     if popular
-       then return $ BloomMap bloom context_map
-       else return $ BloomMap bloom (M.insertWith (V.zipWith (+)) word new_context context_map)
---    | popular = ((BloomMap new_bloom new_context_map), new_context)
---    | otherwise = ((BloomMap new_bloom context_map), new_context)
---    where
---        (popular, new_bloom) = addToBloom bloom word
---        new_context_map = M.insertWith (V.zipWith (+)) word new_context context_map
+       then return $ BloomMap bloom new_context_map
+       else return $ BloomMap bloom context_map
+    where
+        new_context_map = M.insertWith (V.zipWith (+)) word new_context context_map
 
 -- Chain addWordContext, but only calculate paragraph context once (used by binaryChunkContext)
 addBinaryMultiwordContext :: (PrimMonad m) => BloomMap m -> [String] -> m (BloomMap m)
@@ -144,7 +141,9 @@ addBinaryMultiwordContext bloom_map tokens =
         chunk_context = hashChunk tokens
 
 -- Fill contexts based on whether words cooccur in a chunk
-indexBinaryChunks :: PrimMonad m => [[String]] -> m (BloomMap m)
-indexBinaryChunks tokenized_chunks = do
+indexBinaryChunks :: [[String]] -> M.Map String (V.Vector Int64)
+indexBinaryChunks tokenized_chunks = runST $ do
     bmap <- makeEmptyBloomMap
-    foldM (addBinaryMultiwordContext) bmap tokenized_chunks
+    (BloomMap _ mp) <- foldM (addBinaryMultiwordContext) bmap tokenized_chunks
+    return mp
+    
