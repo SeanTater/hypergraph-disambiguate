@@ -49,30 +49,35 @@ context_dims = 1024 :: Int
 --            more -> more partial collisions, less total collisions
 word_dims = 20
 -- Balance range with memory using by changing this type
-context_type = 0 :: Int64
+type Context m = VM.MVector (PrimState m) Int64
+
 
 {- Get the hash of a word (or any String)
  -
  - This vector is derived from repeated Murmur hashes
  - this vector represents the word when it is added to a context vector
  -}
- 
+
 getNHashes n word =
     [h seed | seed <- [1..n]]
     where h seed = fromIntegral $ Murmur.asWord64 $ Murmur.hash64WithSeed seed word
-hashWord word =
-    V.modify (vimap (\i _ -> evenOddToPosNeg $ fromIntegral i) indices) newEmptyHash
+
+hashWordIntoContext :: (PrimMonad m) => Context m -> String -> m ()
+hashWordIntoContext context word = do
+    vimap (\i _ -> evenOddToPosNeg $ fromIntegral i) indices context
     where
         evenOddToPosNeg x = (mod x 2) * 2 - 1
         indices = map (`mod` context_dims) $ getNHashes word_dims word
 
 -- Join hash-vectors of the words in the paragraph
-hashChunk tokens =
-    foldl' hashAnotherWord newEmptyHash tokens
-    where
-        hashAnotherWord vec word = V.zipWith (+) vec (hashWord word)
+hashChunk :: [String] -> V.Vector Int64
+hashChunk tokens = runST $ do
+    vec <- newEmptyHash
+    mapM_ (hashWordIntoContext vec) tokens
+    V.freeze vec
 
-newEmptyHash = V.replicate context_dims context_type
+newEmptyHash :: (PrimMonad m) => m (Context m)
+newEmptyHash = VM.replicate context_dims 0
 
 
 
@@ -85,7 +90,7 @@ newEmptyHash = V.replicate context_dims context_type
  -}
 bloom_hash_count = 10
 bloom_bin_count = 25000000
-bloom_threshold = 3
+bloom_threshold = 5
 
 -- Count a word, Return (is_popular, new_bloom)
 addToBloom :: (PrimMonad m) => VM.MVector (PrimState m) Word8 -> String -> m Bool
