@@ -10,8 +10,6 @@ import Data.List
 import Control.Monad
 import Control.Monad.Primitive
 import Control.Monad.ST
---import Data.Array.ST
---import Data.Array.Unboxed
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as VM
 import qualified Data.Map.Strict as M
@@ -94,7 +92,6 @@ bloom_threshold = 5
 
 -- Count a word, Return (is_popular, new_bloom)
 addToBloom :: (PrimMonad m) => VM.MVector (PrimState m) Word8 -> String -> m Bool
---addToBloom :: V.Vector Word8 -> String -> (Bool, V.Vector Word8)
 addToBloom bloom word = do
     counts <- sequence [VM.read bloom i | i <- indices ]
     if minimum counts >= bloom_threshold
