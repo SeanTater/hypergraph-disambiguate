@@ -10,7 +10,6 @@ import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout, print)
 import Control.Monad
 import qualified System.ProgressBar as PB
 import System.Environment
-import Data.ByteString (pack)
 import Data.ByteString.Lazy.Builder (int32LE, toLazyByteString)
 import qualified Data.Map.Strict as M
 import qualified Data.Vector.Unboxed as V

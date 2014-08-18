@@ -19,14 +19,11 @@ import qualified Data.Digest.Murmur64 as Murmur
 
 -- -- Utility
 
--- Use modify to get around state
-
---mapOnIndex :: (VM.Unbox a) => (a -> a) -> [Int] -> VM.MVector s a -> ST s ()
+-- |Replace the values of an MVector at specified indices
 mapOnIndex :: (PrimMonad m, V.Unbox t) => (t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
 mapOnIndex func = mapWithIndexOnIndex (\ _ b -> func b)
 
-
---mapWithIndexOnIndex :: (VM.Unbox a) => (Int -> a -> a) -> [Int] -> VM.MVector s a -> ST s ()
+-- |Replace the values of an MVector at specified indices, given the index and value
 mapWithIndexOnIndex :: (PrimMonad m, V.Unbox t) => (Int -> t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
 mapWithIndexOnIndex func indices vec =
     foldM_ map1 vec indices
@@ -41,29 +38,30 @@ mapWithIndexOnIndex func indices vec =
 
 -- -- Hashing, for use in Bloom and in Random Indexing
 
--- Feel free to set these
--- context_dims: n-dimensional space in which words are placed
---               more dimensions -> less overlap, less performance
+-- | n-dimensional space in which words are placed.
+-- more dimensions -> less overlap, less performance
 context_dims = 1024
--- word_dims: count of dimensions where a word is not on the axis
---            more -> more partial collisions, less total collisions
+-- | count of dimensions where a word is not on the axis.
+-- more -> more partial collisions, less total collisions
 word_dims = 20
--- Balance range with memory using by changing this type
+
+-- | Signed type used to store contexts (balance between range and memory)
 type ContextSize = Int32
+-- | Mutable context (implemented as an MVector
 type MutableContext m = VM.MVector (PrimState m) ContextSize
+-- | Immutable context
 type Context = V.Vector ContextSize
 
 
-{- Get the hash of a word (or any String)
- -
- - This vector is derived from repeated Murmur hashes
- - this vector represents the word when it is added to a context vector
- -}
-
+{-| Get murmur-based hashes of a string.
+Multiple hashes are made by replacing the seed value with
+integers from 1 to n.
+-}
 getNHashes n word =
     [h seed | seed <- [1..n]]
     where h seed = fromIntegral $ Murmur.asWord64 $ Murmur.hash64WithSeed seed word
 
+-- | Monadically add a word to a hash
 hashWordIntoContext :: (PrimMonad m) => MutableContext m -> String -> m ()
 hashWordIntoContext context word =
     mapWithIndexOnIndex (\i _ -> picksign i) indices context
@@ -71,16 +69,12 @@ hashWordIntoContext context word =
         picksign x = fromIntegral $ popCount x .&. 1
         indices = map (`mod` context_dims) $ getNHashes word_dims word
 
--- Join hash-vectors of the words in the paragraph
+-- | Generate and sum contexts for words in a list of tokens
 hashChunk :: [String] -> Context
 hashChunk tokens = runST $ do
-    vec <- newEmptyHash
+    vec <- VM.replicate context_dims 0
     mapM_ (hashWordIntoContext vec) tokens
     V.freeze vec
-
-newEmptyHash :: (PrimMonad m) => m (MutableContext m)
-newEmptyHash = VM.replicate context_dims 0
-
 
 
 -- -- Bloom
@@ -94,7 +88,8 @@ bloom_hash_count = 10
 bloom_bin_count = 25000000
 bloom_threshold = 50
 
--- Count a word, Return (is_popular, new_bloom)
+-- | Add a token to a monadic bloom filter
+-- and return whether the token has passed the popularity threshold
 addToBloom :: (PrimMonad m) => MutableBloom m -> String -> m Bool
 addToBloom bloom word = do
     counts <- sequence [VM.read bloom i | i <- indices ]
@@ -112,10 +107,12 @@ makeNewBloom =
     VM.replicate bloom_bin_count (0::Word8)
     
 
--- -- Bloomed Map
+-- | Monadic Bloom container
 type MutableBloom m = VM.MVector (PrimState m) Word8
+-- | Monadic Bloom with associated map
 data BloomMap m = BloomMap (MutableBloom m) (M.Map String Context)
 
+-- | Create an empty Bloom Map
 makeEmptyBloomMap :: PrimMonad m => m (BloomMap m)
 makeEmptyBloomMap = do
     bloom <- makeNewBloom
@@ -125,7 +122,8 @@ makeEmptyBloomMap = do
 
 -- -- Random Indexing
 
--- If the word appears in the bloom at least n times, add context vectors
+-- | Insert or merge a word's context into the main (pure) map,
+-- if the word has passed the popularity threshold in the bloom
 addWordContext :: (PrimMonad m) => Context -> BloomMap m -> String -> m (BloomMap m)
 addWordContext new_context (BloomMap bloom context_map) word = do
     popular <- addToBloom bloom word
@@ -135,14 +133,16 @@ addWordContext new_context (BloomMap bloom context_map) word = do
     where
         new_context_map = M.insertWith (V.zipWith (+)) word new_context context_map
 
--- Chain addWordContext, but only calculate paragraph context once (used by binaryChunkContext)
+-- | Chain addWordContext, but only calculate paragraph context once (used by binaryChunkContext)
+-- Note that every word is counted in the context, _even the unpopular ones_.
+-- Whether this is good or not is up for debate
 addBinaryMultiwordContext :: (PrimMonad m) => BloomMap m -> [String] -> m (BloomMap m)
 addBinaryMultiwordContext bloom_map tokens =
     foldM (addWordContext chunk_context) bloom_map tokens
     where
         chunk_context = hashChunk tokens
 
--- Fill contexts based on whether words cooccur in a chunk
+-- | Fill contexts based on whether words cooccur in a chunk
 indexBinaryChunks :: (PrimMonad m) => BloomMap m -> [[String]] -> m (BloomMap m)
 indexBinaryChunks bmap tokenized_chunks =
     foldM addBinaryMultiwordContext bmap tokenized_chunks
