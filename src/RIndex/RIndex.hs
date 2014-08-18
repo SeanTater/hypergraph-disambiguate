@@ -66,7 +66,7 @@ hashWordIntoContext :: (PrimMonad m) => MutableContext m -> String -> m ()
 hashWordIntoContext context word =
     mapWithIndexOnIndex (\i _ -> picksign i) indices context
     where
-        picksign x = fromIntegral $ popCount x .&. 1
+        picksign x = fromIntegral $ (popCount x .&. 1) * 2 - 1
         indices = map (`mod` context_dims) $ getNHashes word_dims word
 
 -- | Generate and sum contexts for words in a list of tokens
