@@ -36,7 +36,7 @@ processBlock conn bmap start = do
                 lastrowid = fromSql $ (\(i:_) -> i) $ last wordcounts
             
             -- handle paragraphs
-            newbmap <- foldM' processParagraph bmap paragraphs
+            newbmap <- foldM processParagraph bmap paragraphs
             let RIndex.BloomMap _ mp = newbmap
             putStr "Unique words indexed: "
             print $ M.size mp
@@ -45,13 +45,6 @@ processBlock conn bmap start = do
     where  
         processParagraph bmap paragraph =
             RIndex.addBinaryMultiwordContext bmap [ fromSql w :: String | ( _ : w : _ )  <- paragraph]
-    
-foldM' :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m a
-foldM' _ z [] = return z
-foldM' f z (x:xs) = do
-  z' <- f z x
-  z' `seq` foldM' f z' xs
-    
 
 main = do
     text_database:_ <- getArgs 
