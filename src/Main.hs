@@ -64,7 +64,6 @@ main = do
     --print $ length wc_as_wc
     
     committer <- prepare conn "INSERT OR REPLACE INTO rindex (word, context) VALUES (?, ?);"
-    let imap2vec imap = [IM.findWithDefault 0 i imap | i <- [0 .. 1024] ]
-    executeMany committer [ [toSql word, toSql $ toLazyByteString $ foldMap int32LE $ imap2vec imap] | (word, imap) <- M.toList mp]
+    executeMany committer [ [toSql word, toSql $ toLazyByteString $ foldMap int32LE $ V.toList vec] | (word, vec) <- M.toList mp]
     commit conn
     disconnect conn
