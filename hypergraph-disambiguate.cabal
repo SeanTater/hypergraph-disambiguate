@@ -53,7 +53,7 @@ executable hypergraph-disambiguate
   -- other-modules:       
   
   -- Other library packages from which modules are imported.
-  build-depends:       base ==4.6.*, vector ==0.10.*, containers ==0.5.*, murmur-hash ==0.1.*, HDBC-sqlite3 ==2.3.*, HDBC ==2.4.*, split ==0.2.*, mtl ==2.2.*, primitive ==0.5.*
+  build-depends:       base ==4.6.*, vector ==0.10.*, containers ==0.5.*, murmur-hash ==0.1.*, HDBC-sqlite3 ==2.3.*, HDBC ==2.4.*, split ==0.2.*, mtl ==2.2.*, primitive ==0.5.*, terminal-progress-bar ==0.0.*, bytestring ==0.10.*
   
   -- Directories containing source files.
   hs-source-dirs:      src
