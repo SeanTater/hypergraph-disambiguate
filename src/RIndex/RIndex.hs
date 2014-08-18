@@ -8,9 +8,11 @@ module RIndex.RIndex where
 import Data.Word
 import Data.Int
 import Data.List
+import qualified Data.IntMap.Strict as IM
 import Control.Monad
 import Control.Monad.Primitive
 import Control.Monad.ST
+import Data.Bits
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as VM
 import qualified Data.Map.Strict as M
@@ -49,7 +51,7 @@ context_dims = 1024
 word_dims = 20
 -- Balance range with memory using by changing this type
 type ContextSize = Int32
-type MutableContext m = VM.MVector (PrimState m) ContextSize
+type MContext = IM.IntMap ContextSize
 type Context = V.Vector ContextSize
 
 
@@ -63,22 +65,20 @@ getNHashes n word =
     [h seed | seed <- [1..n]]
     where h seed = fromIntegral $ Murmur.asWord64 $ Murmur.hash64WithSeed seed word
 
-hashWordIntoContext :: (PrimMonad m) => MutableContext m -> String -> m ()
+hashWordIntoContext :: MContext -> String -> MContext
 hashWordIntoContext context word =
-    mapWithIndexOnIndex (\i _ -> evenOddToPosNeg $ fromIntegral i) indices context
+    foldl' (\ctx idx -> IM.insertWith (+) idx (picksign idx) ctx) context indices
     where
-        evenOddToPosNeg x = (mod x 2) * 2 - 1
+        picksign x = fromIntegral $ popCount x .&. 1
         indices = map (`mod` context_dims) $ getNHashes word_dims word
 
 -- Join hash-vectors of the words in the paragraph
-hashChunk :: [String] -> Context
-hashChunk tokens = runST $ do
-    vec <- newEmptyHash
-    mapM_ (hashWordIntoContext vec) tokens
-    V.freeze vec
+hashChunk :: [String] -> MContext
+hashChunk =
+    foldl' (hashWordIntoContext) IM.empty
 
-newEmptyHash :: (PrimMonad m) => m (MutableContext m)
-newEmptyHash = VM.replicate context_dims 0
+--newEmptyHash :: (PrimMonad m) => m (MutableContext m)
+--newEmptyHash = VM.replicate context_dims 0
 
 
 
@@ -113,7 +113,7 @@ makeNewBloom =
 
 -- -- Bloomed Map
 type MutableBloom m = VM.MVector (PrimState m) Word8
-data BloomMap m = BloomMap (MutableBloom m) (M.Map String Context)
+data BloomMap m = BloomMap (MutableBloom m) (M.Map String MContext)
 
 makeEmptyBloomMap :: PrimMonad m => m (BloomMap m)
 makeEmptyBloomMap = do
@@ -125,14 +125,14 @@ makeEmptyBloomMap = do
 -- -- Random Indexing
 
 -- If the word appears in the bloom at least n times, add context vectors
-addWordContext :: (PrimMonad m) => Context -> BloomMap m -> String -> m (BloomMap m)
+addWordContext :: (PrimMonad m) => MContext -> BloomMap m -> String -> m (BloomMap m)
 addWordContext new_context (BloomMap bloom context_map) word = do
     popular <- addToBloom bloom word
     return $ BloomMap bloom (if popular
        then new_context_map
        else context_map)
     where
-        new_context_map = M.insertWith (V.zipWith (+)) word new_context context_map
+        new_context_map = M.insertWith (IM.unionWith (+)) word new_context context_map
 
 -- Chain addWordContext, but only calculate paragraph context once (used by binaryChunkContext)
 addBinaryMultiwordContext :: (PrimMonad m) => BloomMap m -> [String] -> m (BloomMap m)

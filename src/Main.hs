@@ -17,15 +17,11 @@ import qualified Data.Vector.Unboxed as V
 import Data.List
 import Data.Monoid
 import Data.Foldable (foldMap)
+import qualified Data.IntMap.Strict as IM
 import Database.HDBC
 import Database.HDBC.Sqlite3
 
 data WordCount = WordCount String Int deriving (Show)
-    
-progress (si:_) =
-    when (i `mod` 1000 == 0) $
-        PB.progressBar (PB.msg "Indexing") (\x y -> PB.exact x y ++ PB.percentage x y) 80 i 1264293473
-    where i = fromSql si
 
 
 processBlock conn bmap start = do
@@ -41,8 +37,10 @@ processBlock conn bmap start = do
             let RIndex.BloomMap _ mp = newbmap
             putStr "Unique words indexed: "
             print $ M.size mp
+            
+            PB.progressBar (PB.msg "Total words indexed") (\x y -> PB.exact x y ++ PB.percentage x y) 160 (fromIntegral lastrowid) 1264293473
+            
             processBlock conn newbmap lastrowid
-        
     where  
         processParagraph bmap paragraph =
             RIndex.addBinaryMultiwordContext bmap [ fromSql w :: String | ( _ : w : _ )  <- paragraph]
