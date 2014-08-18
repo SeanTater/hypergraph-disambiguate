@@ -8,6 +8,7 @@ module RIndex.RIndex where
 import Data.Word
 import Data.Int
 import Data.List
+import Data.Bits
 import Control.Monad
 import Control.Monad.Primitive
 import Control.Monad.ST
@@ -65,9 +66,9 @@ getNHashes n word =
 
 hashWordIntoContext :: (PrimMonad m) => MutableContext m -> String -> m ()
 hashWordIntoContext context word =
-    mapWithIndexOnIndex (\i _ -> evenOddToPosNeg $ fromIntegral i) indices context
+    mapWithIndexOnIndex (\i _ -> picksign i) indices context
     where
-        evenOddToPosNeg x = (mod x 2) * 2 - 1
+        picksign x = fromIntegral $ popCount x .&. 1
         indices = map (`mod` context_dims) $ getNHashes word_dims word
 
 -- Join hash-vectors of the words in the paragraph
