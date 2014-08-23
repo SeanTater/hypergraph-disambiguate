@@ -20,16 +20,10 @@ import Database.HDBC
 import Database.HDBC.Sqlite3
 
 data WordCount = WordCount String Int deriving (Show)
-    
-progress (si:_) =
-    when (i `mod` 1000 == 0) $
-        PB.progressBar (PB.msg "Indexing") (\x y -> PB.exact x y ++ PB.percentage x y) 80 i 1264293473
-    where i = fromSql si
 
-
-processBlock conn bmap start = do
+indexBlock conn bmap start = do
     wordcounts <- quickQuery' conn "SELECT rowid, word, para_id FROM word_counts WHERE rowid > ? LIMIT 100000" [toSql start]
-    if null wordcounts || start > 100000000
+    if null wordcounts || start > 10000000
         then    return bmap
         else do
             let paragraphs = groupBy (\(i1 : w1 : p1 : _) (i2 : w2 : p2 : _)  -> (fromSql p1 :: Int) == fromSql p2) wordcounts
@@ -40,7 +34,7 @@ processBlock conn bmap start = do
             let RIndex.BloomMap _ mp = newbmap
             putStr "Unique words indexed: "
             print $ M.size mp
-            processBlock conn newbmap lastrowid
+            indexBlock conn newbmap lastrowid
         
     where  
         processParagraph bmap paragraph =
@@ -51,11 +45,10 @@ main = do
     conn <- connectSqlite3 text_database
     
     empty_bmap <- RIndex.makeEmptyBloomMap
-    RIndex.BloomMap _ mp <- processBlock conn empty_bmap (-1::Int)
+    RIndex.BloomMap _ mp <- indexBlock conn empty_bmap (-1::Int)
     
     putStr "\nKey count: "
     print $ M.size mp
-    --print $ length wc_as_wc
     
     committer <- prepare conn "INSERT OR REPLACE INTO rindex (word, context) VALUES (?, ?);"
     executeMany committer [ [toSql word, toSql $ toLazyByteString $ foldMap int32LE $ V.toList vec] | (word, vec) <- M.toList mp]

@@ -19,21 +19,11 @@ import qualified Data.Digest.Murmur64 as Murmur
 
 -- -- Utility
 
--- |Replace the values of an MVector at specified indices
-mapOnIndex :: (PrimMonad m, V.Unbox t) => (t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
-mapOnIndex func = mapWithIndexOnIndex (\ _ b -> func b)
-
--- |Replace the values of an MVector at specified indices, given the index and value
-mapWithIndexOnIndex :: (PrimMonad m, V.Unbox t) => (Int -> t -> t) -> [Int] -> VM.MVector (PrimState m) t -> m ()
-mapWithIndexOnIndex func indices vec =
-    foldM_ map1 vec indices
-    where
-         map1 ov i = do
-             e_in <- VM.read ov i
-             let e_out = func i e_in
-             VM.write ov i e_out
-             return ov
-
+applyMV :: (PrimMonad m, V.Unbox t) => (Int -> t -> t) -> VM.MVector (PrimState m) t -> Int -> m ()
+applyMV func vec i = do
+    e_in <- VM.read vec i
+    VM.write vec i (func i e_in)
+    return ()
 
 
 -- -- Hashing, for use in Bloom and in Random Indexing
@@ -64,9 +54,9 @@ getNHashes n word =
 -- | Monadically add a word to a hash
 hashWordIntoContext :: (PrimMonad m) => MutableContext m -> String -> m ()
 hashWordIntoContext context word =
-    mapWithIndexOnIndex (\i _ -> picksign i) indices context
+    mapM_ (applyMV (picksign) context) indices
     where
-        picksign x = fromIntegral $ (popCount x .&. 1) * 2 - 1
+        picksign x _ = fromIntegral $ (popCount x .&. 1) * 2 - 1
         indices = map (`mod` context_dims) $ getNHashes word_dims word
 
 -- | Generate and sum contexts for words in a list of tokens
@@ -96,10 +86,10 @@ addToBloom bloom word = do
     if minimum counts >= bloom_threshold
        then return True
        else do
-           mapOnIndex incrementClamp indices bloom
+           mapM_ (applyMV (incrementClamp) bloom) indices
            return False
     where
-        incrementClamp a = max a (a+1)
+        incrementClamp _ a = max a (a+1)
         indices = [ hash `mod` bloom_bin_count | hash <- getNHashes bloom_hash_count word ]
 
 makeNewBloom :: PrimMonad m => m (VM.MVector (PrimState m) Word8)
