@@ -4,11 +4,12 @@ module RIndex.RIndex where
         murmur-hash
         vector
 -}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, FlexibleInstances #-} -- Data.Binary uses this anyway
 import Data.Word
 import Data.Int
 import Data.List
 import Data.Bits
+import Data.Binary
 import Control.Monad
 import Control.Monad.Primitive
 import Control.Monad.ST
@@ -42,6 +43,10 @@ type MutableContext m = VM.MVector (PrimState m) ContextSize
 -- | Immutable context
 type Context = V.Vector ContextSize
 
+
+instance Binary (V.Vector Int32) where
+    put x = put $ V.toList x
+    get = liftM V.fromList get
 
 {-| Get murmur-based hashes of a string.
 Multiple hashes are made by replacing the seed value with
