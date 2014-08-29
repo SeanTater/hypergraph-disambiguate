@@ -1,22 +1,25 @@
+{-# LANGUAGE BangPatterns, FlexibleInstances #-} -- Data.Binary uses this anyway
 module RIndex.RIndex where
 {-
     You'll need:
         murmur-hash
         vector
 -}
-{-# LANGUAGE BangPatterns, FlexibleInstances #-} -- Data.Binary uses this anyway
+import Prelude hiding (mapM_, minimum)
 import Data.Word
 import Data.Int
-import Data.List
+import Data.Foldable
 import Data.Bits
 import Data.Binary
-import Control.Monad
+import Control.Monad (when, unless, liftM)
 import Control.Monad.Primitive
 import Control.Monad.ST
+import Control.Parallel
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as VM
 import qualified Data.Map.Strict as M
 import qualified Data.Digest.Murmur64 as Murmur
+import qualified Data.Sequence as Seq
 
 -- -- Utility
 
@@ -81,63 +84,72 @@ hashChunk tokens = runST $ do
  -}
 bloom_hash_count = 10
 bloom_bin_count = 25000000
-bloom_threshold = 50
+bloom_threshold = 50 :: Word8
 
 -- | Add a token to a monadic bloom filter
 -- and return whether the token has passed the popularity threshold
-addToBloom :: (PrimMonad m) => MutableBloom m -> String -> m Bool
+addToBloom :: (PrimMonad m) => MutableBloom m -> String -> m ()
 addToBloom bloom word = do
-    counts <- sequence [VM.read bloom i | i <- indices ]
-    if minimum counts >= bloom_threshold
-       then return True
-       else do
-           mapM_ (applyMV (incrementClamp) bloom) indices
-           return False
+    counts <- sequence [ VM.read bloom i | i <- indices ]
+    let popular = (minimum counts) >= bloom_threshold
+    when popular $
+        mapM_ (applyMV (incrementClamp) bloom) indices
     where
         incrementClamp _ a = max a (a+1)
         indices = [ hash `mod` bloom_bin_count | hash <- getNHashes bloom_hash_count word ]
 
+isPopular :: Bloom -> String -> Bool
+isPopular bloom word = do
+    (minimum [(V.!) bloom i | i <- indices ]) >= bloom_threshold
+    where
+        indices = [ hash `mod` bloom_bin_count | hash <- getNHashes bloom_hash_count word ]
+
+mergeBlooms :: Bloom -> Bloom -> Bloom
+mergeBlooms x y =
+    par x $ seq y $ V.zipWith addClamp x y
+    where addClamp a b = max 255 (a+b)
+        
 makeNewBloom :: PrimMonad m => m (VM.MVector (PrimState m) Word8)
 makeNewBloom =
     VM.replicate bloom_bin_count (0::Word8)
+
+makeImmBloom :: Bloom
+makeImmBloom = V.replicate bloom_bin_count 0
     
 
 -- | Monadic Bloom container
 type MutableBloom m = VM.MVector (PrimState m) Word8
+-- | Bloom container
+type Bloom = V.Vector Word8
 -- | Monadic Bloom with associated map
-data BloomMap m = BloomMap (MutableBloom m) (M.Map String Context)
+type ContextMap = M.Map String Context
 
--- | Create an empty Bloom Map
-makeEmptyBloomMap :: PrimMonad m => m (BloomMap m)
-makeEmptyBloomMap = do
+countChunk :: Foldable f => f [String] -> Bloom
+countChunk paragraphs = runST $ do
     bloom <- makeNewBloom
-    return $ BloomMap bloom M.empty
-
-
+    mapM_ (mapM_ (addToBloom bloom)) paragraphs
+    V.freeze bloom
 
 -- -- Random Indexing
 
 -- | Insert or merge a word's context into the main (pure) map,
 -- if the word has passed the popularity threshold in the bloom
-addWordContext :: (PrimMonad m) => Context -> BloomMap m -> String -> m (BloomMap m)
-addWordContext new_context (BloomMap bloom context_map) word = do
-    popular <- addToBloom bloom word
-    return $ BloomMap bloom (if popular
-       then new_context_map
-       else context_map)
-    where
-        new_context_map = M.insertWith (V.zipWith (+)) word new_context context_map
+addWordContext :: Context -> Bloom -> ContextMap -> String -> ContextMap
+addWordContext new_context bloom context_map word =
+    if isPopular bloom word
+       then M.insertWith (V.zipWith (+)) word new_context context_map
+       else context_map
 
 -- | Chain addWordContext, but only calculate paragraph context once (used by binaryChunkContext)
 -- Note that every word is counted in the context, _even the unpopular ones_.
 -- Whether this is good or not is up for debate
-addBinaryMultiwordContext :: (PrimMonad m) => BloomMap m -> [String] -> m (BloomMap m)
-addBinaryMultiwordContext bloom_map tokens =
-    foldM (addWordContext chunk_context) bloom_map tokens
+addBinaryMultiwordContext :: Bloom -> ContextMap -> [String] -> ContextMap
+addBinaryMultiwordContext bloom context_map tokens =
+    foldl' (addWordContext chunk_context bloom) context_map tokens
     where
         chunk_context = hashChunk tokens
 
 -- | Fill contexts based on whether words cooccur in a chunk
-indexBinaryChunks :: (PrimMonad m) => BloomMap m -> [[String]] -> m (BloomMap m)
-indexBinaryChunks bmap tokenized_chunks =
-    foldM addBinaryMultiwordContext bmap tokenized_chunks
+indexBinaryChunks :: Bloom -> ContextMap -> (Seq.Seq [String]) -> ContextMap
+indexBinaryChunks bloom context_map tokenized_chunks =
+    foldl' (addBinaryMultiwordContext bloom) context_map tokenized_chunks
