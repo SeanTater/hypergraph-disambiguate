@@ -43,7 +43,7 @@ chunkParagraphs conn = do
             
 
 indexChunk :: RIndex.Bloom -> RIndex.ContextMap -> (Seq.Seq String) -> RIndex.ContextMap
-indexChunk bloom contextmap paragraphs =
+indexChunk bloom !contextmap paragraphs =
     foldl' processParagraph contextmap paragraphs
     where
         processParagraph cmap paragraph = RIndex.addBinaryMultiwordContext bloom cmap $ uniqueWords paragraph
