@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 {-# LANGUAGE BangPatterns, FlexibleInstances #-} -- Data.Binary uses this anyway
+=======
+>>>>>>> d89f44b4bab328e05a61b15df3fa27f643ec152b
 module RIndex.RIndex where
 {-
     You'll need:
@@ -28,7 +31,6 @@ applyMV func vec i = do
     e_in <- VM.read vec i
     VM.write vec i (func i e_in)
     return ()
-
 
 -- -- Hashing, for use in Bloom and in Random Indexing
 
@@ -62,6 +64,7 @@ getNHashes n word =
 -- | Monadically add a word to a hash
 hashWordIntoContext :: (PrimMonad m) => MutableContext m -> String -> m ()
 hashWordIntoContext context word =
+
     mapM_ (applyMV (picksign) context) indices
     where
         picksign x _ = fromIntegral $ (popCount x .&. 1) * 2 - 1
@@ -114,8 +117,7 @@ makeNewBloom =
     VM.replicate bloom_bin_count (0::Word8)
 
 makeImmBloom :: Bloom
-makeImmBloom = V.replicate bloom_bin_count 0
-    
+makeImmBloom = V.replicate bloom_bin_count 0    
 
 -- | Monadic Bloom container
 type MutableBloom m = VM.MVector (PrimState m) Word8
