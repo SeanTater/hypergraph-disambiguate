@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 {-# LANGUAGE BangPatterns, FlexibleInstances #-} -- Data.Binary uses this anyway
-=======
->>>>>>> d89f44b4bab328e05a61b15df3fa27f643ec152b
 module RIndex.RIndex where
 {-
     You'll need:
