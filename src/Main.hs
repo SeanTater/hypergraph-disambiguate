@@ -4,9 +4,10 @@
         vector
 -}
 {-# LANGUAGE BangPatterns #-}
-import qualified RIndex.RIndex as RIndex
+import Index.RandomIndexing (ContextMap(..), addBinaryMultiwordContext)
+import Index.Bloom (Bloom(..), countChunk)
 
-import Prelude hiding (foldl', foldl1)
+import Prelude hiding (foldl', foldl1, concatMap)
 import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout, print)
 import System.Environment
 import Control.Monad hiding (mapM_)
@@ -24,60 +25,65 @@ import Data.Binary
 import Text.Printf
 import Data.Foldable
 import Data.List (foldl1')
-import qualified Data.Map.Strict as M
+import qualified Data.Text as Text
+import qualified Data.HashMap.Strict as M
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
+
+import Debug.Trace
+
         
-chunkParagraphs :: Connection -> Producer (Seq.Seq String) IO ()
+chunkParagraphs :: Connection -> Producer (Seq.Seq Text.Text) IO ()
 chunkParagraphs conn = do
     query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
     nextChunk (0::Int) query
     where
         nextChunk idx [] = return ()
         nextChunk idx content = do
-            let (start, end) = splitAt 50000 content
+            let (start, end) = splitAt 10000 content
             yield $ Seq.fromList $ fmap (fromSql . head) start
-            lift $ (printf "about %i paragraphs fetched\n" idx :: IO () )
-            nextChunk (idx+50000) end
+            lift $ (printf "about %i paragraphs fetched\n" (idx + 10000) :: IO () )
+            nextChunk (idx+10000) end
             
 
-indexChunk :: RIndex.Bloom -> RIndex.ContextMap -> (Seq.Seq String) -> RIndex.ContextMap
-indexChunk bloom !contextmap paragraphs =
-    foldl' processParagraph contextmap paragraphs
+indexChunk :: Bloom -> (Seq.Seq Text.Text) -> ContextMap
+indexChunk bloom paragraphs =
+    foldl' processParagraph mempty paragraphs
     where
-        processParagraph cmap paragraph = RIndex.addBinaryMultiwordContext bloom cmap $ uniqueWords paragraph
-        uniqueWords = S.toList . S.fromList . words -- TODO: Do better splitting-}
-            
-bloomChunk :: (RIndex.Bloom, Int) -> (Seq.Seq String) -> (RIndex.Bloom, Int)
-bloomChunk (hist, hist_count) paragraphs =
-    if hist_count < 10
-       then par merged_new_bloom $ (merged_new_bloom, hist_count + 1)
-       else seq hist $ (merged_new_bloom, 2)
-    where
-        merged_new_bloom =
-            seq new_bloom $ RIndex.mergeBlooms new_bloom hist
-        new_bloom = RIndex.countChunk $ fmap uniqueWords paragraphs
-        --processParagraph bmap paragraph = do
-        --    RIndex.addBinaryMultiwordContext bmap $ uniqueWords paragraph
-        uniqueWords = S.toList . S.fromList . words -- TODO: Do better splitting
+        processParagraph cmap paragraph = seq cmap $ addBinaryMultiwordContext bloom cmap $ uniqueWords paragraph
+        uniqueWords = S.toList . S.fromList . Text.words -- TODO: Do better splitting-}
 
+-- | Convert paragraphs to word sets, so that we are counting
+-- the number of `unique paragraphs` where the word appears.
+-- e.g. "me me me me me" is [("me", 1)] but "me\n\nme\n\nme" is [("me", 3)]
+bloomChunk :: (Seq.Seq Text.Text) -> Bloom
+bloomChunk paragraphs =
+    countChunk $ concatMap uniqueWords paragraphs
+    where
+        uniqueWords = S.toList . S.fromList . Text.words -- TODO: Do better splitting
+
+
+parFold threads chunkMapper chunks =
+    P.fold processChunk (replicate threads mempty) mconcat chunks
+    where
+        processChunk hists chunk =
+            pseq mother $ pseq father $ par me $ (third : others) ++ [me, mempty]
+            where
+                me = mappend (chunkMapper chunk) $ mappend mother father
+                mother : third : father : others = hists
 
 main = do
     text_database:_ <- getArgs 
     conn <- connectSqlite3 text_database
     
-    -- pchunks <- chunkParagraphs conn (-1)
-    -- putStr $ head $ pchunks
-    
-     
-    -- runEffect $ (chunkParagraphs conn) >-> (bloomChunk Seq.empty)
     putStrLn "Part 1: Counting words (for filtering)"
-    end_bloom <- P.fold bloomChunk (RIndex.makeImmBloom, 1) (fst) (chunkParagraphs conn)
-    print $ V.sum end_bloom
+    end_bloom <- parFold 10 bloomChunk (chunkParagraphs conn)
+    case end_bloom of
+         Bloom x -> print $ V.sum x
     
     putStrLn "Part 2: Generating contexts"
-    context_map <- P.fold (indexChunk end_bloom) M.empty id (chunkParagraphs conn)
+    ContextMap context_map <- parFold 10 (indexChunk end_bloom) (chunkParagraphs conn)
     
     putStrLn "Loading result in database"
     
