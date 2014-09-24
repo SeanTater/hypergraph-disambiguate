@@ -34,8 +34,8 @@ import qualified Data.Sequence as Seq
 import Debug.Trace
 
         
-chunkParagraphs :: Connection -> Producer (Seq.Seq Text.Text) IO ()
-chunkParagraphs conn = do
+pullParagraphChunks :: Connection -> Producer (Seq.Seq Text.Text) IO ()
+pullParagraphChunks conn = do
     query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
     nextChunk (0::Int) query
     where
@@ -78,12 +78,12 @@ main = do
     conn <- connectSqlite3 text_database
     
     putStrLn "Part 1: Counting words (for filtering)"
-    end_bloom <- parFold 10 bloomChunk (chunkParagraphs conn)
+    end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
     case end_bloom of
          Bloom x -> print $ V.sum x
     
     putStrLn "Part 2: Generating contexts"
-    ContextMap context_map <- parFold 10 (indexChunk end_bloom) (chunkParagraphs conn)
+    ContextMap context_map <- parFold 10 (indexChunk end_bloom) (pullParagraphChunks conn)
     
     putStrLn "Loading result in database"
     

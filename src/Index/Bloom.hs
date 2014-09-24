@@ -28,7 +28,7 @@ bloom_threshold = 50 :: Word8
 type MutableBloom m = VM.MVector (PrimState m) Word8
 -- | Bloom container
 newtype Bloom = Bloom (V.Vector Word8)
-
+-- | Blooms are mergable
 instance Monoid Bloom where
     mempty = Bloom $ V.replicate bloom_bin_count 0
     mappend (Bloom x) (Bloom y) =
@@ -48,13 +48,14 @@ addToBloom bloom word = do
         incrementClamp _ a = min 255 $ max a (a+1)
         indices = [ hash `mod` bloom_bin_count | hash <- getNHashes bloom_hash_count word ]
 
+-- | Is the word popular in the bloom?
 isPopular :: Bloom -> Text.Text -> Bool
 isPopular (Bloom bloom) word = do
     (minimum [(V.!) bloom i | i <- indices ]) >= bloom_threshold
     where
         indices = [ hash `mod` bloom_bin_count | hash <- getNHashes bloom_hash_count word ]
 
-
+-- | Count all of the words in a paragraph 
 countChunk :: [Text.Text] -> Bloom
 countChunk paragraphs = runST $ do
     workbloom <- VM.replicate bloom_bin_count (0::Word8)

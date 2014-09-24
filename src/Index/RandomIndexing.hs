@@ -1,5 +1,8 @@
 {-# LANGUAGE BangPatterns, FlexibleInstances #-} -- Data.Binary uses this anyway
-module Index.RandomIndexing where
+module Index.RandomIndexing (
+    stat,
+    ContextMap(..),
+    addBinaryMultiwordContext) where
 {-
     You'll need:
         murmur-hash
@@ -8,7 +11,7 @@ module Index.RandomIndexing where
 import Prelude hiding (mapM_, minimum)
 import Data.Int
 import Data.Foldable
-import Data.Bits
+import Data.Bits (popCount, (.&.))
 import Data.Binary
 import Data.Monoid
 import Control.Monad (when, unless, liftM)
@@ -25,10 +28,8 @@ import Index.Utility
 
 import Debug.Trace
 
--- -- Hashing, for use in Bloom and in Random Indexing
-
 -- | n-dimensional space in which words are placed.
--- more dimensions -> less overlap, less performance
+-- more dimensions -> less overlap, slower
 context_dims = 1024
 -- | count of dimensions where a word is not on the axis.
 -- more -> more partial collisions, less total collisions
@@ -36,21 +37,31 @@ word_dims = 20
 
 -- | Signed type used to store contexts (balance between range and memory)
 type ContextSize = Int32
--- | Mutable context (implemented as an MVector
+
+-- | Mutable context implemented as an MVector
 type MutableContext m = VM.MVector (PrimState m) ContextSize
+
 -- | Immutable context
-type Context = V.Vector ContextSize        
+newtype Context = Context (V.Vector ContextSize)
 
 newtype ContextMap = ContextMap (M.HashMap Text.Text Context)
+
+-- | Contexts are mergable
+instance Monoid Context where
+    mempty = Context $ V.replicate context_dims 0
+    mappend (Context n1) (Context n2) =
+        Context $ V.zipWith (+) n1 n2
+    
+-- | ContextMaps are mergable
 instance Monoid ContextMap where
     mempty = ContextMap M.empty
     mappend (ContextMap !a) (ContextMap !b) =
-        ContextMap $ traceShow (M.size a) $ M.unionWith (V.zipWith (+)) a b
+        ContextMap $ traceShow (M.size a) $ M.unionWith mappend a b
 
-instance Binary (V.Vector Int32) where
-    put x = put $ V.toList x
-    get = liftM V.fromList get
-
+-- | Contexts can be encoded as binary arrays
+instance Binary Context where
+    put (Context x) = put $ V.toList x
+    get = liftM (Context . V.fromList) get
 
 
 -- | Monadically add a word to a hash
@@ -67,17 +78,17 @@ hashChunk :: [Text.Text] -> Context
 hashChunk tokens = runST $ do
     vec <- VM.replicate context_dims 0
     mapM_ (hashWordIntoContext vec) tokens
-    V.freeze vec
-            
+    fvec <- V.freeze vec
+    return $ Context fvec
 
--- -- Random Indexing
+-- Semantic Distribution Indexing
 
 -- | Insert or merge a word's context into the main (pure) map,
 -- if the word has passed the popularity threshold in the bloom
 addWordContext :: Context -> Bloom -> ContextMap -> Text.Text -> ContextMap
 addWordContext new_context bloom (ContextMap context_map) word =
     if isPopular bloom word
-       then ContextMap $ M.insertWith (V.zipWith (+)) word new_context context_map
+       then ContextMap $ M.insertWith mappend word new_context context_map
        else ContextMap context_map
 
 -- | Chain addWordContext, but only calculate paragraph context once (used by binaryChunkContext)
@@ -93,3 +104,11 @@ addBinaryMultiwordContext bloom context_map tokens =
 indexBinaryChunks :: Bloom -> ContextMap -> (Seq.Seq [Text.Text]) -> ContextMap
 indexBinaryChunks bloom context_map tokenized_chunks =
     foldl' (addBinaryMultiwordContext bloom) context_map tokenized_chunks
+
+    
+stat :: ContextMap -> String
+stat (ContextMap cm) =
+    "Context Map Statistics: "
+        ++ show sz ++ " keys, about" ++ show (sz * 8 / 1024) ++ " MB"
+    where
+        sz = fromIntegral $ M.size cm
