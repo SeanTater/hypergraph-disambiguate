@@ -65,8 +65,6 @@ from htmlentitydefs import name2codepoint
 
 import sqlite3
 import nltk
-import porterstemmer
-from collections import Counter
 
 ### PARAMS ####################################################################
 
@@ -124,29 +122,14 @@ version = '2.5-wk'
 db_conn = sqlite3.connect("wordcounts.db")
 db_cursor = db_conn.cursor()
 db_cursor.execute("PRAGMA synchronous=off;")
-paragraph_id = 0
 
-def WikiDocument(out, id, title, text):
-    url = get_url(id, prefix)
-    header = '<doc id="%s" url="%s" title="%s">\n' % (id, url, title)
-    # Separate header from text with a newline.
-    header += title + '\n'
-    header = header.encode('utf-8')
-    text = clean(text)
-    footer = "\n</doc>"
-    global paragraph_id
+def WikiDocument(id, title, text):
+    paragraph_id = 0
     
-    stemmer = porterstemmer.Stemmer()
-    
-    for paragraph in compact(text):
-        
+    for paragraph in compact(clean(text)):
         db_conn.execute("INSERT INTO PARAGRAPHS (doc_id, para_id, content) VALUES (?, ?, ?);",
             (id, paragraph_id, paragraph))
         
-        paragraph_split = ( stemmer(word) for word in re.findall(r"\w+|[^\w\s]", paragraph, re.UNICODE) ) #nltk.word_tokenize(paragraph))
-        for word, count in Counter(paragraph_split).most_common():
-            db_conn.execute("INSERT INTO WORD_COUNTS (word, count, para_id) VALUES (?, ?, ?);",
-                (word, count, paragraph_id))
         paragraph_id += 1
         
     db_conn.commit()
@@ -535,54 +518,11 @@ def handle_unicode(entity):
 
 #------------------------------------------------------------------------------
 
-class OutputSplitter:
-    def __init__(self, compress, max_file_size, path_name):
-        self.dir_index = 0
-        self.file_index = -1
-        self.compress = compress
-        self.max_file_size = max_file_size
-        self.path_name = path_name
-        self.out_file = self.open_next_file()
-
-    def reserve(self, size):
-        cur_file_size = self.out_file.tell()
-        if cur_file_size + size > self.max_file_size:
-            self.close()
-            self.out_file = self.open_next_file()
-
-    def write(self, text):
-        self.out_file.write(text)
-
-    def close(self):
-        self.out_file.close()
-
-    def open_next_file(self):
-        self.file_index += 1
-        if self.file_index == 100:
-            self.dir_index += 1
-            self.file_index = 0
-        dir_name = self.dir_name()
-        if not os.path.isdir(dir_name):
-            os.makedirs(dir_name)
-        file_name = os.path.join(dir_name, self.file_name())
-        if self.compress:
-            return bz2.BZ2File(file_name + '.bz2', 'w')
-        else:
-            return open(file_name, 'w')
-
-    def dir_name(self):
-        char1 = self.dir_index % 26
-        char2 = self.dir_index / 26 % 26
-        return os.path.join(self.path_name, '%c%c' % (ord('A') + char2, ord('A') + char1))
-
-    def file_name(self):
-        return 'wiki_%02d' % self.file_index
-
 ### READER ###################################################################
 
 tagRE = re.compile(r'(.*?)<(/?\w+)[^>]*>(?:([^<]*)(<.*?>)?)?')
 
-def process_data(input, output):
+def process_data(input):
     global prefix
 
     page = []
@@ -623,7 +563,7 @@ def process_data(input, output):
                     not redirect:
                 print id, title.encode('utf-8')
                 sys.stdout.flush()
-                WikiDocument(output, id, title, ''.join(page))
+                WikiDocument(id, title, ''.join(page))
             id = None
             page = []
         elif tag == 'base':
@@ -649,8 +589,8 @@ def main():
     script_name = os.path.basename(sys.argv[0])
 
     try:
-        long_opts = ['help', 'compress', 'bytes=', 'basename=', 'links', 'ns=', 'sections', 'output=', 'version']
-        opts, args = getopt.gnu_getopt(sys.argv[1:], 'cb:hln:o:B:sv', long_opts)
+        long_opts = ['help', 'basename=', 'links', 'ns=', 'sections', 'version']
+        opts, args = getopt.gnu_getopt(sys.argv[1:], 'hln:B:sv', long_opts)
     except getopt.GetoptError:
         show_usage(script_name)
         sys.exit(1)
@@ -663,31 +603,14 @@ def main():
         if opt in ('-h', '--help'):
             show_help()
             sys.exit()
-        elif opt in ('-c', '--compress'):
-            compress = True
         elif opt in ('-l', '--links'):
             keepLinks = True
         elif opt in ('-s', '--sections'):
             keepSections = True
         elif opt in ('-B', '--base'):
             prefix = arg
-        elif opt in ('-b', '--bytes'):
-            try:
-                if arg[-1] in 'kK':
-                    file_size = int(arg[:-1]) * 1024
-                elif arg[-1] in 'mM':
-                    file_size = int(arg[:-1]) * 1024 * 1024
-                else:
-                    file_size = int(arg)
-                if file_size < minFileSize: raise ValueError()
-            except ValueError:
-                print >> sys.stderr, \
-                '%s: %s: Insufficient or invalid size' % (script_name, arg)
-                sys.exit(2)
         elif opt in ('-n', '--ns'):
                 acceptedNamespaces = set(arg.split(','))
-        elif opt in ('-o', '--output'):
-                output_dir = arg
         elif opt in ('-v', '--version'):
                 print 'WikiExtractor.py version:', version
                 sys.exit(0)
@@ -706,9 +629,7 @@ def main():
     if not keepLinks:
         ignoreTag('a')
 
-    output_splitter = OutputSplitter(compress, file_size, output_dir)
-    process_data(sys.stdin, output_splitter)
-    output_splitter.close()
+    process_data(sys.stdin)
 
 if __name__ == '__main__':
     main()

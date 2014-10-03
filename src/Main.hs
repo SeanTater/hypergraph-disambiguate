@@ -4,7 +4,7 @@
         vector
 -}
 {-# LANGUAGE BangPatterns #-}
-import Index.RandomIndexing (ContextMap(..), addBinaryMultiwordContext)
+import qualified Index.DistSemantics as DS
 import Index.Bloom (Bloom(..), countChunk)
 
 import Prelude hiding (foldl', foldl1, concatMap)
@@ -26,7 +26,7 @@ import Text.Printf
 import Data.Foldable
 import Data.List (foldl1')
 import qualified Data.Text as Text
-import qualified Data.HashMap.Strict as M
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
@@ -39,19 +39,20 @@ pullParagraphChunks conn = do
     query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
     nextChunk (0::Int) query
     where
+        chunksize = 1000
         nextChunk idx [] = return ()
         nextChunk idx content = do
-            let (start, end) = splitAt 10000 content
+            let (start, end) = splitAt chunksize content
             yield $ Seq.fromList $ fmap (fromSql . head) start
-            lift $ (printf "about %i paragraphs fetched\n" (idx + 10000) :: IO () )
-            nextChunk (idx+10000) end
+            lift $ (printf "about %i paragraphs fetched\n" (idx + chunksize) :: IO () )
+            nextChunk (idx+chunksize) end
             
 
-indexChunk :: Bloom -> (Seq.Seq Text.Text) -> ContextMap
+indexChunk :: Bloom -> (Seq.Seq Text.Text) -> DS.Distributions
 indexChunk bloom paragraphs =
-    foldl' processParagraph mempty paragraphs
+    mconcat $ toList $ fmap processParagraph paragraphs
     where
-        processParagraph cmap paragraph = seq cmap $ addBinaryMultiwordContext bloom cmap $ uniqueWords paragraph
+        processParagraph paragraph = DS.getDistributions bloom $ uniqueWords paragraph
         uniqueWords = S.toList . S.fromList . Text.words -- TODO: Do better splitting-}
 
 -- | Convert paragraphs to word sets, so that we are counting
@@ -79,19 +80,17 @@ main = do
     
     putStrLn "Part 1: Counting words (for filtering)"
     end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
-    case end_bloom of
-         Bloom x -> print $ V.sum x
     
     putStrLn "Part 2: Generating contexts"
-    ContextMap context_map <- parFold 10 (indexChunk end_bloom) (pullParagraphChunks conn)
+    dist <- parFold 10 (indexChunk end_bloom) (pullParagraphChunks conn)
     
     putStrLn "Loading result in database"
     
     
     putStr "\nTotal unique words found: "
-    print $ M.size context_map
+    print $ DS.stat dist
     
     committer <- prepare conn "INSERT OR REPLACE INTO rindex (word, context) VALUES (?, ?);"
-    executeMany committer [ [toSql word, toSql $ encode vec] | (word, vec) <- M.toList context_map]
+    executeMany committer [ [toSql word, toSql vec] | (word, vec) <- DS.serialize dist]
     commit conn
     disconnect conn

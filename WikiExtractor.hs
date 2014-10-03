@@ -132,40 +132,17 @@ version = "2.6"
 
 -- ##### Main function ###########################################################
 
-
-def WikiDocument(out, id, title, text):
-    url = get_url(id, prefix)
-    header = "<doc id=\"%s\" url=\"%s\" title=\"%s\">\n" % (id, url, title)
-    --  Separate header from text with a newline.
-    header += title + "\n"
-    header = header.encode("utf-8")
-    text = clean(text)
-    footer = "\n</doc>"
-    global paragraph_id
-    
-    stemmer = porterstemmer.Stemmer()
-    
-    for paragraph in compact(text):
-        
+data WikiDocument = WikiDocument { wid    :: Int
+                                 , wtitle :: String
+                                 , wtext  :: String
+                                 } deriving (Show, Eq)
+uploadDoc doc = 
+    for paragraph in compact(clean( wtext doc )):
         db_conn.execute("INSERT INTO PARAGRAPHS (doc_id, para_id, content) VALUES (?, ?, ?);",
             (id, paragraph_id, paragraph))
-        
-        paragraph_split = ( stemmer(word) for word in re.findall(r"\w+|[^\w\s]", paragraph, re.UNICODE) ) #nltk.word_tokenize(paragraph))
-        for word, count in Counter(paragraph_split).most_common():
-            db_conn.execute("INSERT INTO WORD_COUNTS (word, count, para_id) VALUES (?, ?, ?);",
-                (word, count, paragraph_id))
         paragraph_id += 1
         
     db_conn.commit()
-    
-    #out.reserve(len(header) + len(text) + len(footer))
-    #print >> out, header
-    #for line in compact(text):
-        #print >> out, line.encode("utf-8")
-    #print >> out, footer
-
-def get_url(id, prefix):
-    return "%s?curid=%s" % (prefix, id)
 
 -- ----------------------------------------------------------------------------
 
@@ -540,15 +517,24 @@ def handle_unicode(entity):
 
 -- ## READER ###################################################################
 
-tagRE = re.compile(r"(.*?)<(/?\w+)[^>]*>(?:([^<]*)(<.*?>)?)?")
+tagRE = "(.*?)<(/?[[:word:]]+)[^>]*>(([^<]*)(<.*?>)?)?"
+{-
+group
+1 -> 1
+2 -> 2
+3 -> 4
+4 -> 5
+-}
 
-process_data input output =
-    global prefix
+data ParserState = Tag String | 
 
+process_data lines =
     page = []
     id = None
     inText = False
     redirect = False
+    let [mw, m1, m2, m3, m4]:_ = line =~ tagRE
+    
     for line in input:
         line = line.decode("utf-8")
         tag = ""
@@ -583,7 +569,7 @@ process_data input output =
                     not redirect:
                 print id, title.encode("utf-8")
                 sys.stdout.flush()
-                WikiDocument(output, id, title, "".join(page))
+                WikiDocument(id, title, "".join(page))
             id = None
             page = []
         elif tag == "base":

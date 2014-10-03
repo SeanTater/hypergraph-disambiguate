@@ -20,3 +20,4 @@ applyMV func vec i = do
     e_in <- VM.read vec i
     VM.write vec i (func i e_in)
     return ()
+    
