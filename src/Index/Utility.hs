@@ -3,6 +3,8 @@ import qualified Data.Digest.Murmur64 as Murmur
 import qualified Data.Text.Encoding as TextEncoding
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Vector.Unboxed.Mutable as VM
+import qualified Data.HashSet as HS
+import qualified Data.Text as Text
 import Control.Monad.Primitive
 
 {-| Get murmur-based hashes of a string.
@@ -21,3 +23,9 @@ applyMV func vec i = do
     VM.write vec i (func i e_in)
     return ()
     
+conservativeTokenize :: Text.Text -> [Text.Text]
+conservativeTokenize = 
+    HS.toList . HS.fromList . (Text.split spaceOrPunctuation) . Text.toLower 
+    where
+        spaceOrPunctuation char = HS.member char delimiters 
+        delimiters = HS.fromList "\t ~`!@#$%^&*()_+-={}|[]\\:\";'<>?,./"

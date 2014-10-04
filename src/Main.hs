@@ -5,6 +5,7 @@
 -}
 {-# LANGUAGE BangPatterns #-}
 import qualified Index.DistSemantics as DS
+import qualified Index.Utility as U
 import Index.Bloom (Bloom(..), countChunk)
 
 import Prelude hiding (foldl', foldl1, concatMap)
@@ -39,7 +40,7 @@ pullParagraphChunks conn = do
     query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
     nextChunk (0::Int) query
     where
-        chunksize = 1000
+        chunksize = 10000
         nextChunk idx [] = return ()
         nextChunk idx content = do
             let (start, end) = splitAt chunksize content
@@ -52,17 +53,14 @@ indexChunk :: Bloom -> (Seq.Seq Text.Text) -> DS.Distributions
 indexChunk bloom paragraphs =
     mconcat $ toList $ fmap processParagraph paragraphs
     where
-        processParagraph paragraph = DS.getDistributions bloom $ uniqueWords paragraph
-        uniqueWords = S.toList . S.fromList . Text.words -- TODO: Do better splitting-}
+        processParagraph paragraph = DS.getDistributions bloom $ U.conservativeTokenize paragraph
 
 -- | Convert paragraphs to word sets, so that we are counting
 -- the number of `unique paragraphs` where the word appears.
 -- e.g. "me me me me me" is [("me", 1)] but "me\n\nme\n\nme" is [("me", 3)]
 bloomChunk :: (Seq.Seq Text.Text) -> Bloom
 bloomChunk paragraphs =
-    countChunk $ concatMap uniqueWords paragraphs
-    where
-        uniqueWords = S.toList . S.fromList . Text.words -- TODO: Do better splitting
+    countChunk $ concatMap U.conservativeTokenize paragraphs
 
 
 parFold threads chunkMapper chunks =
@@ -82,7 +80,7 @@ main = do
     end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
     
     putStrLn "Part 2: Generating contexts"
-    dist <- parFold 10 (indexChunk end_bloom) (pullParagraphChunks conn)
+    dist <- P.fold (\x y -> mappend x (indexChunk end_bloom y)) mempty id (pullParagraphChunks conn)
     
     putStrLn "Loading result in database"
     
@@ -90,7 +88,7 @@ main = do
     putStr "\nTotal unique words found: "
     print $ DS.stat dist
     
-    committer <- prepare conn "INSERT OR REPLACE INTO rindex (word, context) VALUES (?, ?);"
-    executeMany committer [ [toSql word, toSql vec] | (word, vec) <- DS.serialize dist]
+    committer <- prepare conn "INSERT OR REPLACE INTO rindex (word, count, context) VALUES (?, ?, ?);"
+    executeMany committer [ [toSql word, toSql cnt, toSql vec] | (word, cnt, vec) <- DS.serialize dist]
     commit conn
     disconnect conn
