@@ -6,7 +6,7 @@
 {-# LANGUAGE BangPatterns #-}
 import qualified Index.DistSemantics as DS
 import qualified Index.Utility as U
-import Index.Bloom (Bloom(..), countChunk)
+import qualified Index.Popularity as P
 
 import Prelude hiding (foldl', foldl1, concatMap)
 import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout, print)
@@ -37,10 +37,10 @@ import Debug.Trace
         
 pullParagraphChunks :: Connection -> Producer (Seq.Seq Text.Text) IO ()
 pullParagraphChunks conn = do
-    query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
+    query <- lift $ quickQuery conn "SELECT content FROM paragraphs LIMIT 1000000" []
     nextChunk (0::Int) query
     where
-        chunksize = 10000
+        chunksize = 100000
         nextChunk idx [] = return ()
         nextChunk idx content = do
             let (start, end) = splitAt chunksize content
@@ -49,21 +49,19 @@ pullParagraphChunks conn = do
             nextChunk (idx+chunksize) end
             
 
-indexChunk :: Bloom -> (Seq.Seq Text.Text) -> DS.Distributions
-indexChunk bloom paragraphs =
-    mconcat $ toList $ fmap processParagraph paragraphs
+indexChunk :: P.Popularity -> (Seq.Seq Text.Text) -> DS.Distributions
+indexChunk popularity paragraphs =
+    mconcat dist_list
     where
-        processParagraph paragraph = DS.getDistributions bloom $ U.conservativeTokenize paragraph
+        dist_list = toList $ fmap processParagraph paragraphs
+        processParagraph paragraph = DS.mkDistributions $ filter (P.isPopular popularity) $ U.conservativeTokenize paragraph
 
--- | Convert paragraphs to word sets, so that we are counting
--- the number of `unique paragraphs` where the word appears.
--- e.g. "me me me me me" is [("me", 1)] but "me\n\nme\n\nme" is [("me", 3)]
-bloomChunk :: (Seq.Seq Text.Text) -> Bloom
+-- | Count the words prior to making contexts (to save much memory)
+bloomChunk :: (Seq.Seq Text.Text) -> P.Popularity
 bloomChunk paragraphs =
-    countChunk $ concatMap U.conservativeTokenize paragraphs
+    P.trimCount $ P.mergeChunks $ toList $ fmap (P.countChunk . U.conservativeTokenize) paragraphs
 
-
-parFold threads chunkMapper chunks =
+{-parFold threads chunkMapper chunks =
     P.fold processChunk (replicate threads mempty) mconcat chunks
     where
         processChunk hists chunk =
@@ -71,21 +69,23 @@ parFold threads chunkMapper chunks =
             where
                 me = mappend (chunkMapper chunk) $ mappend mother father
                 mother : third : father : others = hists
-
+                -}
 main = do
     text_database:_ <- getArgs 
     conn <- connectSqlite3 text_database
     
     putStrLn "Part 1: Counting words (for filtering)"
-    end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
+    --end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
+    end_bloom <- P.fold (\x y -> mappend x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
+    
+    putStrLn $ "Found " ++ (show $ HM.size end_bloom) ++ " popular words"
     
     putStrLn "Part 2: Generating contexts"
     dist <- P.fold (\x y -> mappend x (indexChunk end_bloom y)) mempty id (pullParagraphChunks conn)
     
-    putStrLn "Loading result in database"
+    putStrLn "Part 3: Loading result in database"
     
-    
-    putStr "\nTotal unique words found: "
+    putStr "\nCollection statistics: "
     print $ DS.stat dist
     
     committer <- prepare conn "INSERT OR REPLACE INTO rindex (word, count, context) VALUES (?, ?, ?);"
