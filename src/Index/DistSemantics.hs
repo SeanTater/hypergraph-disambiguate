@@ -31,7 +31,6 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Sequence as Seq
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Vector.Unboxed as V
-import Index.Bloom
 import Index.Utility
 import Control.Parallel.Strategies
 import Control.Parallel
@@ -73,11 +72,11 @@ instance Monoid DSWord where
                     , dscontext = mempty
                     , dstext = ""
                     }
-    mappend a b = DSWord { dscount = (dscount a+dscount b)
+    mappend a b = DSWord { dscount = dscount a + dscount b
                     , dscontext = mappend (dscontext a) (dscontext b)
-                    , dstext = if Text.null $ dstext a
-                                  then dstext b
-                                  else dstext a
+                    , dstext = dstext (if Text.null $ dstext a
+                                        then b
+                                        else a)
                     }
     mconcat x = merged { dscontext = mseq $ dscontext merged}
         where
@@ -88,14 +87,14 @@ instance Monoid DSWord where
 newtype Distributions = Distributions (HM.HashMap Text.Text DSWord) deriving (Show)
 
 instance Monoid Distributions where
-    mempty = Distributions $ HM.empty
-    mappend (Distributions a) (Distributions b) = Distributions $ HM.unionWith (mappend) a b
+    mempty = Distributions HM.empty
+    mappend (Distributions a) (Distributions b) = Distributions $ HM.unionWith mappend a b
     mconcat chunks =
-        merge $ ((chunkAndMerge chunks) `using` (parList rseq))
+        merge (chunkAndMerge chunks `using` parList rseq)
         where
             chunkAndMerge [] = []
             chunkAndMerge xs =
-                merge front : (chunkAndMerge back)
+                merge front : chunkAndMerge back
                 where
                     (front, back) = splitAt 1000 xs
             merge =
@@ -120,7 +119,7 @@ serialize (Distributions all_dists) =
         -- Find the average context vector
         averageContextVector :: V.Vector Double
         averageContextVector = 
-            V.map (\x -> x / len) total
+            V.map (/ len) total
             where
                 len = fromIntegral $ HM.size all_dists -- this is an O(n) operation otherwise
                 total = foldl' (V.zipWith (+)) emptyContextVector $ subtractEach $ HM.elems all_dists
@@ -133,13 +132,13 @@ serialize (Distributions all_dists) =
 
 cosineSimilarity :: V.Vector Double -> V.Vector Double -> Double
 cosineSimilarity first second =
-    (sum $ elemwise_product)
+    (sum elemwise_product)
     /
     ((sqrt $ sum $ elemwise_square first) * (sqrt $ sum $ elemwise_square second))
     where
         l = filter (\x -> abs x > 0.01) . V.toList
         aWithB = zip (l first) (l second)
-        elemwise_product = map (\(a, b) -> a*b) aWithB
+        elemwise_product = map uncurry aWithB
         elemwise_square vec = map (\a -> a * a) (l vec)
 
 -- | n-dimensional space in which words are placed.

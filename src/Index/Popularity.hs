@@ -16,17 +16,18 @@ import qualified Data.HashMap.Strict as HM
 import Data.Foldable
 import Control.Monad.ST
 import Index.Utility
+import qualified Data.Stream as St
 
 type Popularity = HM.HashMap Text.Text Int
-popularity_threshold = 5
+popularity_threshold = 10
 
 mergeChunks :: [Popularity] -> Popularity
 mergeChunks chunks =
-    merge $ ((chunkAndMerge chunks) `using` (parList rseq))
+    merge (chunkAndMerge chunks `using` parList rseq)
     where
         chunkAndMerge [] = []
         chunkAndMerge xs =
-            merge front : (chunkAndMerge back)
+            merge front : chunkAndMerge back
             where
                 (front, back) = splitAt 1000 xs
         merge =
@@ -37,8 +38,7 @@ countChunk tokens =
     HM.fromListWith (+) $ map (\x -> (x, 1)) tokens
 
 trimCount :: Popularity -> Popularity
-trimCount counter =
-    HM.filter (>popularity_threshold) counter
+trimCount = HM.filter (>popularity_threshold)
 
 isPopular :: Popularity -> Text.Text -> Bool
 isPopular counter token = HM.lookupDefault 0 token counter > popularity_threshold

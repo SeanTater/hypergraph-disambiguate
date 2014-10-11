@@ -3,7 +3,6 @@
         murmur-hash
         vector
 -}
-{-# LANGUAGE BangPatterns #-}
 import qualified Index.DistSemantics as DS
 import qualified Index.Utility as U
 import qualified Index.Popularity as P
@@ -37,7 +36,7 @@ import Debug.Trace
         
 pullParagraphChunks :: Connection -> Producer (Seq.Seq Text.Text) IO ()
 pullParagraphChunks conn = do
-    query <- lift $ quickQuery conn "SELECT content FROM paragraphs LIMIT 1000000" []
+    query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
     nextChunk (0::Int) query
     where
         chunksize = 100000
@@ -45,11 +44,11 @@ pullParagraphChunks conn = do
         nextChunk idx content = do
             let (start, end) = splitAt chunksize content
             yield $ Seq.fromList $ fmap (fromSql . head) start
-            lift $ (printf "about %i paragraphs fetched\n" (idx + chunksize) :: IO () )
+            lift (printf "about %i paragraphs fetched\n" (idx + chunksize) :: IO () )
             nextChunk (idx+chunksize) end
             
 
-indexChunk :: P.Popularity -> (Seq.Seq Text.Text) -> DS.Distributions
+indexChunk :: P.Popularity -> Seq.Seq Text.Text -> DS.Distributions
 indexChunk popularity paragraphs =
     mconcat dist_list
     where
@@ -57,7 +56,7 @@ indexChunk popularity paragraphs =
         processParagraph paragraph = DS.mkDistributions $ filter (P.isPopular popularity) $ U.conservativeTokenize paragraph
 
 -- | Count the words prior to making contexts (to save much memory)
-bloomChunk :: (Seq.Seq Text.Text) -> P.Popularity
+bloomChunk :: Seq.Seq Text.Text -> P.Popularity
 bloomChunk paragraphs =
     P.trimCount $ P.mergeChunks $ toList $ fmap (P.countChunk . U.conservativeTokenize) paragraphs
 
@@ -78,7 +77,7 @@ main = do
     --end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
     end_bloom <- P.fold (\x y -> mappend x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
     
-    putStrLn $ "Found " ++ (show $ HM.size end_bloom) ++ " popular words"
+    putStrLn $ "Found " ++ show (HM.size end_bloom) ++ " popular words"
     
     putStrLn "Part 2: Generating contexts"
     dist <- P.fold (\x y -> mappend x (indexChunk end_bloom y)) mempty id (pullParagraphChunks conn)

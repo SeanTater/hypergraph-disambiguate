@@ -127,8 +127,8 @@ def WikiDocument(id, title, text):
     paragraph_id = 0
     
     for paragraph in compact(clean(text)):
-        db_conn.execute("INSERT INTO PARAGRAPHS (doc_id, para_id, content) VALUES (?, ?, ?);",
-            (id, paragraph_id, paragraph))
+        db_conn.execute("INSERT INTO PARAGRAPHS (doc_id, title, para_id, content) VALUES (?, ?, ?, ?);",
+            (id, title, paragraph_id, paragraph))
         
         paragraph_id += 1
         

@@ -73,8 +73,8 @@ executable hypergraph-disambiguate
     bzlib ==0.5.*,
     regex-pcre ==0.94.*,
     groups ==0.4.*,
-    data-binary-ieee754 ==0.4.*
-    
+    data-binary-ieee754 ==0.4.*,
+    stream-fusion ==0.1.*   
   
   -- Directories containing source files.
   hs-source-dirs:      src
@@ -104,6 +104,7 @@ test-suite main-test-suite
     regex-pcre ==0.94.*,
     groups ==0.4.*,
     data-binary-ieee754 ==0.4.*,
+    stream-fusion ==0.1.*,
     QuickCheck == 2.7.*,
     tasty == 0.10.*,
     tasty-quickcheck == 0.8.*

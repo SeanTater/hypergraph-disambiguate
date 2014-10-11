@@ -25,7 +25,7 @@ applyMV func vec i = do
     
 conservativeTokenize :: Text.Text -> [Text.Text]
 conservativeTokenize = 
-    (filter (not. Text.null)). (Text.split spaceOrPunctuation) . Text.toLower 
+    filter (not . Text.null) . Text.split spaceOrPunctuation . Text.toLower 
     where
         spaceOrPunctuation char = HS.member char delimiters 
         delimiters = HS.fromList "\t ~`!@#$%^&*()_+-={}|[]\\:\";'<>?,./"
