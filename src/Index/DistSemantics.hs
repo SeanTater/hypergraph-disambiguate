@@ -14,7 +14,7 @@ module Index.DistSemantics (
         murmur-hash
         vector
 -}
-import Prelude hiding (mapM_, minimum, sum, concat)
+import Prelude hiding (mapM_, minimum, sum, concat, foldl, foldl', foldr)
 import Data.Int
 import Data.Foldable
 import Data.Bits ((.&.))
@@ -34,53 +34,54 @@ import qualified Data.Vector.Unboxed as V
 import Index.Utility
 import Control.Parallel.Strategies
 import Control.Parallel
+import Data.Word
+import qualified Data.List.Stream as St
 import Debug.Trace
 
 -- | The sum of a word's sparse-vector "neighborhood"
-data Context = ConcreteContext (V.Vector Double)
-             | StreamContext [[(Int, Double)]]
+newtype Context = Context (V.Vector Double)
     deriving (Show)
-emptyContextVector = V.replicate context_dims 0
+emptyContextVector = V.replicate context_dims (0::Double)
 
 instance Monoid Context where
-    mempty = StreamContext [[]]
-    mappend (ConcreteContext !a) (ConcreteContext !b) = ConcreteContext $ V.zipWith (+) a b
-    mappend (ConcreteContext !a) (StreamContext b)   = ConcreteContext $ V.accum (+) a (concat b)
-    mappend (StreamContext a) (ConcreteContext !b)   = ConcreteContext $ V.accum (+) b (concat a)
-    mappend (StreamContext a) (StreamContext b)     = StreamContext $ a ++ b
-    mconcat l = mseq $ foldl' mappend mempty l
+    mempty = Context emptyContextVector
+    mappend (Context a) (Context b) = Context $ V.zipWith (+) a b
+    mconcat l = foldr mappend mempty l
 instance Group Context where
-    invert a = ConcreteContext $ V.map (\x -> -x) c
-        where
-            (ConcreteContext c) = mseq a
-
--- | Force stream evaluation of a context
-mseq :: Context -> Context
-mseq (ConcreteContext a) = ConcreteContext a
-mseq (StreamContext a) = seq concrete $ ConcreteContext concrete
-    where
-        concrete = V.accum (+) emptyContextVector (concat a)
+    invert (Context a) = Context $ V.map (\x -> -x) a
 
 -- | A Dist = frequency count (to subtract this word from it's context) + a Context
 data DSWord = DSWord { dscount :: !Int
                      , dstext :: !Text.Text
                      , dscontext :: !Context
+                     , dsstream :: [(Int, Double)]
                      } deriving (Show)
 
 instance Monoid DSWord where
     mempty = DSWord { dscount = 1
                     , dscontext = mempty
+                    , dsstream = []
                     , dstext = ""
                     }
     mappend a b = DSWord { dscount = dscount a + dscount b
-                    , dscontext = mappend (dscontext a) (dscontext b)
+                    , dscontext = Context $ V.zipWith (+) (merged a) (merged b)
+                    , dsstream = []
                     , dstext = dstext (if Text.null $ dstext a
                                         then b
                                         else a)
                     }
-    mconcat x = merged { dscontext = mseq $ dscontext merged}
         where
-            merged = foldl' mappend mempty x
+            merged x = V.accum (+) v (dsstream x)
+                where (Context v) = dscontext x
+    
+    mconcat xs = DSWord { dscount = sum $ fmap dscount xs
+                    , dscontext = mconcat (fmap dscontext xs)
+                    , dsstream = []
+                    , dstext = dstext $ head xs
+                    }
+        where
+            merged_streams = V.accum (+) emptyContextVector $ St.concatMap dsstream xs
+--    mconcat x = foldl' mappend mempty x
         
 
 -- | Distributions = a mapping from String to Dist
@@ -137,8 +138,7 @@ cosineSimilarity first second =
     ((sqrt $ sum $ elemwise_square first) * (sqrt $ sum $ elemwise_square second))
     where
         l = filter (\x -> abs x > 0.01) . V.toList
-        aWithB = zip (l first) (l second)
-        elemwise_product = map uncurry aWithB
+        elemwise_product = zipWith (\x y -> x*y) (l first) (l second)
         elemwise_square vec = map (\a -> a * a) (l vec)
 
 -- | n-dimensional space in which words are placed.
@@ -153,9 +153,9 @@ getNeighbors word =
     V.zipWith (\x y -> x - (fromIntegral count*y)) original_vec self_vec
     where
         count = dscount word
-        (ConcreteContext original_vec) = mseq $ dscontext word
+        (Context original_vec) = dscontext word
             -- Get _just_ this one word
-        (ConcreteContext self_vec) = mseq $ dscontext $ mkWord (dstext word)
+        (Context self_vec) = dscontext $ mkWord (dstext word)
 
 -- | Extract a DSWord given its text
 lookupWord :: Text.Text -> Distributions -> Maybe DSWord
@@ -166,13 +166,15 @@ lookupWord name (Distributions dists) =
 mkWord :: Text.Text -> DSWord
 mkWord text =
     DSWord { dscount = 1
-           , dscontext = StreamContext [ map getKV $ getNHashes word_dims text ]
+           , dscontext = Context emptyContextVector
+           , dsstream = fmap getKV $ getNHashes word_dims text
            , dstext = text
     }
     where
+        getKV :: Word64 -> (Int, Double)
         getKV hash = 
-            (fromIntegral (hash `mod` context_dims), fromIntegral $ picksign $ Bits.rotate hash 32)
-        picksign hash = fromIntegral $ (Bits.popCount hash .&. 1) * 2 - 1
+            (fromIntegral (hash `rem` fromIntegral context_dims), fromIntegral sign)
+            where sign = (Bits.popCount hash .&. 1) * 2 - 1
 
 -- | Generate a Distributions map from a tokenized string.
 -- The whole string is treated at one logical block of text.

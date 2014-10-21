@@ -1,4 +1,5 @@
 module Index.Popularity (
+    appendChunk,
     countChunk,
     isPopular,
     trimCount,
@@ -32,6 +33,9 @@ mergeChunks chunks =
                 (front, back) = splitAt 1000 xs
         merge =
             foldl' (HM.unionWith (+)) HM.empty
+
+appendChunk :: Popularity -> Popularity -> Popularity
+appendChunk = HM.unionWith (+)
 
 countChunk :: [Text.Text] -> Popularity
 countChunk tokens =

@@ -7,7 +7,7 @@ import qualified Index.DistSemantics as DS
 import qualified Index.Utility as U
 import qualified Index.Popularity as P
 
-import Prelude hiding (foldl', foldl1, concatMap)
+import Prelude hiding (foldl', foldl1, concatMap, mapM_)
 import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout, print)
 import System.Environment
 import Control.Monad hiding (mapM_)
@@ -30,52 +30,41 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
+import qualified Data.Stream as St
+import System.ProgressBar
+import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout )
 
-import Debug.Trace
 
         
-pullParagraphChunks :: Connection -> Producer (Seq.Seq Text.Text) IO ()
+pullParagraphChunks :: Connection -> Producer (Text.Text) IO ()
 pullParagraphChunks conn = do
     query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
-    nextChunk (0::Int) query
+    void $ foldM processParagraph 0 query
     where
-        chunksize = 100000
-        nextChunk idx [] = return ()
-        nextChunk idx content = do
-            let (start, end) = splitAt chunksize content
-            yield $ Seq.fromList $ fmap (fromSql . head) start
-            lift (printf "about %i paragraphs fetched\n" (idx + chunksize) :: IO () )
-            nextChunk (idx+chunksize) end
-            
+        processParagraph count item = do
+            when (count `rem` 1000 == 0)
+                (lift $ progressBar (msg "Paragraphs finished") exact 80 count 43000000)
+            (yield.fromSql.head) item
+            return $ count + 1
 
-indexChunk :: P.Popularity -> Seq.Seq Text.Text -> DS.Distributions
-indexChunk popularity paragraphs =
-    mconcat dist_list
-    where
-        dist_list = toList $ fmap processParagraph paragraphs
-        processParagraph paragraph = DS.mkDistributions $ filter (P.isPopular popularity) $ U.conservativeTokenize paragraph
+indexChunk :: P.Popularity -> Text.Text -> DS.Distributions
+indexChunk popularity =
+    DS.mkDistributions . filter (P.isPopular popularity) . U.conservativeTokenize
 
 -- | Count the words prior to making contexts (to save much memory)
-bloomChunk :: Seq.Seq Text.Text -> P.Popularity
-bloomChunk paragraphs =
-    P.trimCount $ P.mergeChunks $ toList $ fmap (P.countChunk . U.conservativeTokenize) paragraphs
+bloomChunk :: Text.Text -> P.Popularity
+bloomChunk = P.countChunk . U.conservativeTokenize
 
-{-parFold threads chunkMapper chunks =
-    P.fold processChunk (replicate threads mempty) mconcat chunks
-    where
-        processChunk hists chunk =
-            pseq mother $ pseq father $ par me $ (third : others) ++ [me, mempty]
-            where
-                me = mappend (chunkMapper chunk) $ mappend mother father
-                mother : third : father : others = hists
-                -}
 main = do
     text_database:_ <- getArgs 
     conn <- connectSqlite3 text_database
+    hSetBuffering stdout NoBuffering -- For progressBar
     
     putStrLn "Part 1: Counting words (for filtering)"
     --end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
-    end_bloom <- P.fold (\x y -> mappend x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
+    end_bloom <- P.fold (\x y -> P.appendChunk x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
+    --end_bloom <- St.foldl' (\x y -> mappend x (bloomChunk y)) 
+    
     
     putStrLn $ "Found " ++ show (HM.size end_bloom) ++ " popular words"
     
