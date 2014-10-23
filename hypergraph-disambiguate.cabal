@@ -75,7 +75,9 @@ executable hypergraph-disambiguate
     groups ==0.4.*,
     data-binary-ieee754 ==0.4.*,
     stream-fusion ==0.1.*,
-    terminal-progress-bar ==0.0.*
+    terminal-progress-bar ==0.0.*,
+    monad-par == 0.3.*,
+    monad-par-extras == 0.3.*
   
   -- Directories containing source files.
   hs-source-dirs:      src
@@ -107,6 +109,8 @@ test-suite main-test-suite
     data-binary-ieee754 ==0.4.*,
     stream-fusion ==0.1.*,
     terminal-progress-bar ==0.0.*,
+    monad-par == 0.3.*,
+    monad-par-extras == 0.3.*,
     QuickCheck == 2.7.*,
     tasty == 0.10.*,
     tasty-quickcheck == 0.8.*

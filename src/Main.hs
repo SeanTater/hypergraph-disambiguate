@@ -34,6 +34,8 @@ import qualified Data.Stream as St
 import System.ProgressBar
 import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout )
 
+import Control.Monad.Par.Combinator
+
 
         
 pullParagraphChunks :: Connection -> Producer (Text.Text) IO ()
@@ -66,6 +68,37 @@ indexChunk popularity =
 bloomChunk :: Text.Text -> P.Popularity
 bloomChunk = P.countChunk . U.conservativeTokenize
 
+-- | Specialized map-reduce based on parMapReduceRangeThresh but:
+-- 1) Specific to lazy lists;
+-- 2) Incurring a log-size stack of reduced chunks;
+parMapReduceListChunks
+   :: (NFData a, ParFuture iv p)
+      => Int                          -- ^ threshold
+      -> [a]                          -- ^ input (maybe lazy) list
+      -> (Int -> p a)                 -- ^ compute one result
+      -> (a -> a -> p a)              -- ^ combine two results (associative)
+      -> a                            -- ^ initial result
+      -> p a
+      
+parMapReduceRangeThresh threshold stream fn binop init
+    = loop
+    where
+        (chunk, remainder) = splitAt threshold fn
+        loop 
+  loop min max
+    | max - min <= threshold =
+        let mapred a b = do x <- fn b;
+                            result <- a `binop` x
+                            return result
+        in foldM mapred init [min..max]
+
+    | otherwise  = do
+        let mid = min + ((max - min) `quot` 2)
+        rght <- spawn $ loop (mid+1) max
+        l  <- loop  min    mid
+        r  <- get rght
+        l `binop` r
+
 main = do
     text_database:_ <- getArgs 
     conn <- connectSqlite3 text_database
@@ -74,8 +107,12 @@ main = do
     putStrLn "Part 1: Counting words (for filtering)"
     --end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
     --end_bloom <- P.fold (\x y -> P.appendChunk x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
-    paragraphs <- pullParagraphChunksL conn
-    let end_bloom = P.trimCount $ P.mergeChunks $ fmap bloomChunk $ paragraphs
+    
+    --paragraphs <- pullParagraphChunksL conn
+    --let end_bloom = P.trimCount $ P.mergeChunks $ fmap bloomChunk $ paragraphs
+    
+    parMapReduceRangeThresh 100 (InclusiveRange 1 
+    
     --end_bloom <- St.foldl' (\x y -> mappend x (bloomChunk y)) 
     
     
