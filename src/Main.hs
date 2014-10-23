@@ -46,6 +46,17 @@ pullParagraphChunks conn = do
                 (lift $ progressBar (msg "Paragraphs finished") exact 80 count 43000000)
             (yield.fromSql.head) item
             return $ count + 1
+            
+pullParagraphChunksL :: Connection -> IO [Text.Text]
+pullParagraphChunksL conn = do
+    query <- quickQuery conn "SELECT content FROM paragraphs" []
+    sequence [ maybeNotify idx item | (idx, item) <- zip [0..] query ]
+    where
+        maybeNotify :: Integer -> [SqlValue] -> IO Text.Text
+        maybeNotify count item = do
+            when (count `rem` 1000 == 0)
+               (progressBar (msg "Paragraphs finished") exact 80 count 43000000)
+            (return.fromSql.head) item
 
 indexChunk :: P.Popularity -> Text.Text -> DS.Distributions
 indexChunk popularity =
@@ -62,7 +73,9 @@ main = do
     
     putStrLn "Part 1: Counting words (for filtering)"
     --end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
-    end_bloom <- P.fold (\x y -> P.appendChunk x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
+    --end_bloom <- P.fold (\x y -> P.appendChunk x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
+    paragraphs <- pullParagraphChunksL conn
+    let end_bloom = P.trimCount $ P.mergeChunks $ fmap bloomChunk $ paragraphs
     --end_bloom <- St.foldl' (\x y -> mappend x (bloomChunk y)) 
     
     

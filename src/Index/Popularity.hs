@@ -24,15 +24,7 @@ popularity_threshold = 10
 
 mergeChunks :: [Popularity] -> Popularity
 mergeChunks chunks =
-    merge (chunkAndMerge chunks `using` parList rseq)
-    where
-        chunkAndMerge [] = []
-        chunkAndMerge xs =
-            merge front : chunkAndMerge back
-            where
-                (front, back) = splitAt 1000 xs
-        merge =
-            foldl' (HM.unionWith (+)) HM.empty
+    foldt (HM.unionWith (+)) HM.empty chunks
 
 appendChunk :: Popularity -> Popularity -> Popularity
 appendChunk = HM.unionWith (+)
@@ -46,3 +38,17 @@ trimCount = HM.filter (>popularity_threshold)
 
 isPopular :: Popularity -> Text.Text -> Bool
 isPopular counter token = HM.lookupDefault 0 token counter > popularity_threshold
+
+-- The following folds come from the Haskell Wiki
+foldt            :: (a -> a -> a) -> a -> [a] -> a
+foldt f z []     = z
+foldt f z [x]    = x
+foldt f z xs     = foldt f z (pairs f xs)
+ 
+foldi            :: (a -> a -> a) -> a -> [a] -> a
+foldi f z []     = z
+foldi f z (x:xs) = f x (foldi f z (pairs f xs))
+ 
+pairs            :: (a -> a -> a) -> [a] -> [a]
+pairs f (x:y:t)  = f x y `par` (f x y : pairs f t)
+pairs f t        = t
