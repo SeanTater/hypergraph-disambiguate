@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-
     You'll need:
         murmur-hash
@@ -33,8 +34,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.Stream as St
 import System.ProgressBar
 import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout )
-
-import Control.Monad.Par.Combinator
+import Control.DeepSeq
 
 
         
@@ -59,6 +59,11 @@ pullParagraphChunksL conn = do
             when (count `rem` 1000 == 0)
                (progressBar (msg "Paragraphs finished") exact 80 count 43000000)
             (return.fromSql.head) item
+            
+pullParagraphChunksL' :: Connection -> IO [Text.Text]
+pullParagraphChunksL' conn = do
+    query <- quickQuery conn "SELECT content FROM paragraphs" []
+    return $ map (fromSql.head) query
 
 indexChunk :: P.Popularity -> Text.Text -> DS.Distributions
 indexChunk popularity =
@@ -68,36 +73,6 @@ indexChunk popularity =
 bloomChunk :: Text.Text -> P.Popularity
 bloomChunk = P.countChunk . U.conservativeTokenize
 
--- | Specialized map-reduce based on parMapReduceRangeThresh but:
--- 1) Specific to lazy lists;
--- 2) Incurring a log-size stack of reduced chunks;
-parMapReduceListChunks
-   :: (NFData a, ParFuture iv p)
-      => Int                          -- ^ threshold
-      -> [a]                          -- ^ input (maybe lazy) list
-      -> (Int -> p a)                 -- ^ compute one result
-      -> (a -> a -> p a)              -- ^ combine two results (associative)
-      -> a                            -- ^ initial result
-      -> p a
-      
-parMapReduceRangeThresh threshold stream fn binop init
-    = loop
-    where
-        (chunk, remainder) = splitAt threshold fn
-        loop 
-  loop min max
-    | max - min <= threshold =
-        let mapred a b = do x <- fn b;
-                            result <- a `binop` x
-                            return result
-        in foldM mapred init [min..max]
-
-    | otherwise  = do
-        let mid = min + ((max - min) `quot` 2)
-        rght <- spawn $ loop (mid+1) max
-        l  <- loop  min    mid
-        r  <- get rght
-        l `binop` r
 
 main = do
     text_database:_ <- getArgs 
@@ -108,10 +83,9 @@ main = do
     --end_bloom <- parFold 10 bloomChunk (pullParagraphChunks conn)
     --end_bloom <- P.fold (\x y -> P.appendChunk x (bloomChunk y)) mempty P.trimCount (pullParagraphChunks conn)
     
-    --paragraphs <- pullParagraphChunksL conn
+    paragraphs <- pullParagraphChunksL' conn
     --let end_bloom = P.trimCount $ P.mergeChunks $ fmap bloomChunk $ paragraphs
-    
-    parMapReduceRangeThresh 100 (InclusiveRange 1 
+    let end_bloom = U.mapReduceParThresh 1000 bloomChunk P.appendChunk mempty paragraphs
     
     --end_bloom <- St.foldl' (\x y -> mappend x (bloomChunk y)) 
     
