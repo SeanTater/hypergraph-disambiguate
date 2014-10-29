@@ -52,10 +52,10 @@ pullParagraphChunks conn = do
 pullParagraphChunksL :: Connection -> IO [Text.Text]
 pullParagraphChunksL conn = do
     query <- quickQuery conn "SELECT content FROM paragraphs" []
-    sequence [ maybeNotify idx item | (idx, item) <- zip [0..] query ]
+    mapM maybeNotify $ zip [0..] query
     where
-        maybeNotify :: Integer -> [SqlValue] -> IO Text.Text
-        maybeNotify count item = do
+        maybeNotify :: (Integer, [SqlValue]) -> IO Text.Text
+        maybeNotify (count, item) = do
             when (count `rem` 1000 == 0)
                (progressBar (msg "Paragraphs finished") exact 80 count 43000000)
             (return.fromSql.head) item
@@ -85,7 +85,7 @@ main = do
     
     paragraphs <- pullParagraphChunksL' conn
     --let end_bloom = P.trimCount $ P.mergeChunks $ fmap bloomChunk $ paragraphs
-    let end_bloom = U.mapReduceParThresh 1000 bloomChunk P.appendChunk mempty paragraphs
+    let end_bloom = U.mapReduceParThresh 10000 bloomChunk P.appendChunk mempty paragraphs
     
     --end_bloom <- St.foldl' (\x y -> mappend x (bloomChunk y)) 
     
