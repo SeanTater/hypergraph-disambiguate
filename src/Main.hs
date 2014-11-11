@@ -34,13 +34,14 @@ import qualified Data.Sequence as Seq
 import qualified Data.Stream as St
 import System.ProgressBar
 import System.IO ( hSetBuffering, BufferMode(NoBuffering), stdout )
+import System.CPUTime
 import Control.DeepSeq
 
 
         
 pullParagraphChunks :: Connection -> Producer (Text.Text) IO ()
 pullParagraphChunks conn = do
-    query <- lift $ quickQuery conn "SELECT content FROM paragraphs" []
+    query <- lift $ quickQuery conn "SELECT content FROM paragraphs LIMIT 10000" []
     void $ foldM processParagraph 0 query
     where
         processParagraph count item = do
@@ -73,6 +74,15 @@ indexChunk popularity =
 bloomChunk :: Text.Text -> P.Popularity
 bloomChunk = P.countChunk . U.conservativeTokenize
 
+logTime :: IO () -> IO ()
+logTime action = do
+    start <- getCPUTime
+    action
+    end <- getCPUTime
+    let diff = (fromIntegral end - fromIntegral start) / 1e12 :: Double
+    putStrLn $ "Seconds elapsed: " ++ show diff ++ "\n"
+    
+
 
 main = do
     text_database:_ <- getArgs 
@@ -90,7 +100,7 @@ main = do
     --end_bloom <- St.foldl' (\x y -> mappend x (bloomChunk y)) 
     
     
-    putStrLn $ "Found " ++ show (HM.size end_bloom) ++ " popular words"
+    logTime $ putStrLn $ "Found " ++ show (HM.size end_bloom) ++ " popular words"
     
     putStrLn "Part 2: Generating contexts"
     dist <- P.fold (\x y -> mappend x (indexChunk end_bloom y)) mempty id (pullParagraphChunks conn)

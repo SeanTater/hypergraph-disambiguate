@@ -62,6 +62,7 @@ import re
 import bz2
 import os.path
 from htmlentitydefs import name2codepoint
+import cProfile
 
 import sqlite3
 import nltk
@@ -122,6 +123,7 @@ version = '2.5-wk'
 db_conn = sqlite3.connect("wordcounts.db")
 db_cursor = db_conn.cursor()
 db_cursor.execute("PRAGMA synchronous=off;")
+db_cursor.execute("PRAGMA busy_timeout=10000000;")
 
 def WikiDocument(id, title, text):
     paragraph_id = 0
@@ -632,4 +634,4 @@ def main():
     process_data(sys.stdin)
 
 if __name__ == '__main__':
-    main()
+    cProfile.run("main()")
