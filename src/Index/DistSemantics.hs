@@ -37,6 +37,7 @@ import Control.Parallel
 import Data.Word
 import qualified Data.List.Stream as St
 import Debug.Trace
+import Control.DeepSeq
 
 -- | The sum of a word's sparse-vector "neighborhood"
 newtype Context = Context (V.Vector Double)
@@ -86,6 +87,9 @@ instance Monoid DSWord where
 
 -- | Distributions = a mapping from String to Dist
 newtype Distributions = Distributions (HM.HashMap Text.Text DSWord) deriving (Show)
+
+instance NFData Distributions where
+    rnf a = a `seq` ()
 
 instance Monoid Distributions where
     mempty = Distributions HM.empty

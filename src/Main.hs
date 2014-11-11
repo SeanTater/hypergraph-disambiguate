@@ -62,7 +62,7 @@ pullParagraphChunksL conn = do
             
 pullParagraphChunksL' :: Connection -> IO [Text.Text]
 pullParagraphChunksL' conn = do
-    query <- quickQuery conn "SELECT content FROM paragraphs" []
+    query <- quickQuery conn "SELECT content FROM paragraphs LIMIT 500000" []
     return $ map (fromSql.head) query
 
 indexChunk :: P.Popularity -> Text.Text -> DS.Distributions
@@ -85,7 +85,7 @@ main = do
     
     paragraphs <- pullParagraphChunksL' conn
     --let end_bloom = P.trimCount $ P.mergeChunks $ fmap bloomChunk $ paragraphs
-    let end_bloom = U.mapReduceParThresh 10000 bloomChunk P.appendChunk mempty paragraphs
+    let end_bloom = U.simpleReduce 10000 P.appendChunk mempty $ map bloomChunk paragraphs
     
     --end_bloom <- St.foldl' (\x y -> mappend x (bloomChunk y)) 
     
@@ -93,7 +93,9 @@ main = do
     putStrLn $ "Found " ++ show (HM.size end_bloom) ++ " popular words"
     
     putStrLn "Part 2: Generating contexts"
-    dist <- P.fold (\x y -> mappend x (indexChunk end_bloom y)) mempty id (pullParagraphChunks conn)
+    --dist <- P.fold (\x y -> mappend x (indexChunk end_bloom y)) mempty id (pullParagraphChunks conn)
+    paragraphs_2 <- pullParagraphChunksL' conn
+    let dist = U.mapReduceParThresh 1000 (indexChunk end_bloom) mappend mempty paragraphs_2
     
     putStrLn "Part 3: Loading result in database"
     
